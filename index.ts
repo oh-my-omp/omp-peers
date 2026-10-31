@@ -27,10 +27,10 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "./src/errors.ts";
 import { localMain } from "./src/local-main.ts";
 import { node } from "./src/node.ts";
-import { TOOLS } from "./src/tools.ts";
+import { peerTools } from "./src/tools.ts";
 
 export default function ompPeers(pi: ExtensionAPI): void {
-	for (const tool of TOOLS) pi.registerTool(tool);
+	for (const tool of peerTools()) pi.registerTool(tool);
 
 	const warn = (message: string, error: unknown): void => pi.logger.warn(message, { error: errorText(error) });
 	/** The agent id this binding registered, while registered. */

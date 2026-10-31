@@ -4,6 +4,7 @@ import { type ExtensionContext, type ToolDefinition, z } from "@oh-my-pi/pi-codi
 import { unbridgedOmpPids } from "./candidates.ts";
 import { ASK_TIMEOUT_MS, DELIVER_TIMEOUT_MS, type Exchange, exchange, resolveTarget, survey } from "./client.ts";
 import { errorText } from "./errors.ts";
+import { tr } from "./i18n.ts";
 import { MAX_ANSWER_BYTES, MAX_TEXT_BYTES, PROTOCOL_VERSION, type Sender, type SessionInfo } from "./protocol.ts";
 import { topicsFor } from "./topics.ts";
 
@@ -166,41 +167,43 @@ async function guarded(ctx: ExtensionContext, run: () => Promise<Result>): Promi
 	}
 }
 
-export const TOOLS = [
-	{
-		name: "peer_list",
-		label: "Peers",
-		description: `Lists the live omp processes of this user that run omp-peers and their main sessions (id, title, cwd, idle or busy), plus omp processes without omp-peers.
+/** The tool definitions; called once per extension binding, so labels follow the UI language of that session. */
+export const peerTools = () =>
+	[
+		{
+			name: "peer_list",
+			label: tr("Peers", "Peer 列表"),
+			description: `Lists the live omp processes of this user that run omp-peers and their main sessions (id, title, cwd, idle or busy), plus omp processes without omp-peers.
 
 Topics — read the one a call needs before making it:
 - \`xd://peer_list/liveness\` — before relying on who is alive, or when a process shows no session list`,
-		parameters: listParams,
-		approval: "read",
-		docTopics: () => topicsFor("peer_list"),
-		execute: (_id, _params, _signal, _onUpdate, ctx) => guarded(ctx, () => list(ctx)),
-	} satisfies ToolDefinition<typeof listParams> & Topics,
-	{
-		name: "peer_ask",
-		label: "Ask peer",
-		description: `Asks another omp main session a /btw-style side question and returns its answer; the target answers from its current context without adding anything to its conversation.
+			parameters: listParams,
+			approval: "read",
+			docTopics: () => topicsFor("peer_list"),
+			execute: (_id, _params, _signal, _onUpdate, ctx) => guarded(ctx, () => list(ctx)),
+		} satisfies ToolDefinition<typeof listParams> & Topics,
+		{
+			name: "peer_ask",
+			label: tr("Ask peer", "询问 peer"),
+			description: `Asks another omp main session a /btw-style side question and returns its answer; the target answers from its current context without adding anything to its conversation.
 
 Topics — read the one a call needs before making it:
 - \`xd://peer_ask/side-turns\` — before asking, or when an ask fails or comes back cut`,
-		parameters: askParams,
-		approval: "read",
-		docTopics: () => topicsFor("peer_ask"),
-		execute: (_id, params, signal, _onUpdate, ctx) => guarded(ctx, () => ask(params, signal, ctx)),
-	} satisfies ToolDefinition<typeof askParams> & Topics,
-	{
-		name: "peer_send",
-		label: "Message peer",
-		description: `Sends an IRC message to another omp main session: it enters that session's conversation, waking it when idle.
+			parameters: askParams,
+			approval: "read",
+			docTopics: () => topicsFor("peer_ask"),
+			execute: (_id, params, signal, _onUpdate, ctx) => guarded(ctx, () => ask(params, signal, ctx)),
+		} satisfies ToolDefinition<typeof askParams> & Topics,
+		{
+			name: "peer_send",
+			label: tr("Message peer", "发消息给 peer"),
+			description: `Sends an IRC message to another omp main session: it enters that session's conversation, waking it when idle.
 
 Topics — read the one a call needs before making it:
 - \`xd://peer_send/replies\` — before sending, and before replying to an incoming peer message`,
-		parameters: sendParams,
-		approval: "write",
-		docTopics: () => topicsFor("peer_send"),
-		execute: (_id, params, signal, _onUpdate, ctx) => guarded(ctx, () => send(params, signal, ctx)),
-	} satisfies ToolDefinition<typeof sendParams> & Topics,
-] as const;
+			parameters: sendParams,
+			approval: "write",
+			docTopics: () => topicsFor("peer_send"),
+			execute: (_id, params, signal, _onUpdate, ctx) => guarded(ctx, () => send(params, signal, ctx)),
+		} satisfies ToolDefinition<typeof sendParams> & Topics,
+	] as const;

@@ -2,8 +2,8 @@
  * omp-peers: the main sessions of one user's omp processes find each other, ask each other
  * /btw-style side questions and exchange IRC messages.
  *
- * Process node (src/node.ts): one IPC endpoint per omp process, `~/.omp/run/peers/<pid>.sock`
- * (profile-independent), open while at least one main session of the process is registered.
+ * Process node (src/node.ts): one IPC endpoint per omp process, `/tmp/omp-<uid>/peers/<pid>.sock`
+ * (per user, profile-independent, emptied at boot), open while at least one main session of the process is registered.
  * A peer is alive when its endpoint accepts a connection; each connection carries one JSON
  * request (`list`, `ask`, `irc`) and one response (src/protocol.ts).
  *
@@ -11,7 +11,7 @@
  * `session_shutdown` unregisters it, and the last one out closes the endpoint. Session id,
  * title, cwd and idle state are read live, so `/new` and resume need no re-registration.
  * `kill -9` and omp's RPC-mode signal exits skip `session_shutdown`; the endpoint file left
- * behind refuses connections and is taken over by the next process with that pid.
+ * behind refuses connections and stays until reboot empties `/tmp`, or the next process with that pid takes it over.
  *
  * Tools (main sessions only): `peer_list`, `peer_ask` (the target answers through the host's
  * side turn, `ctx.runEphemeralTurn`, without touching its conversation) and `peer_send` (an

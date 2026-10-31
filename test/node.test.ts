@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange, survey } from "../src/client.ts";
 import type * as NodeModule from "../src/node.ts";
-import { type AskOutcome, type LocalMain, node, peersDir } from "../src/node.ts";
+import { type AskOutcome, endpointFor, type LocalMain, node, PeerNode } from "../src/node.ts";
 import { MAX_FRAME_BYTES, PROTOCOL_VERSION, type Sender, truncateUtf8 } from "../src/protocol.ts";
+
+// A private peers directory, so tests never join the user's real peers under /tmp/omp-<uid>.
+const DIR = join(mkdtempSync(join(tmpdir(), "omp-peers-node-")), "peers");
+const peers = new PeerNode(DIR);
 
 const FROM: Sender = { pid: 1, sessionId: "asker", cwd: "/tmp" };
 
@@ -34,26 +39,30 @@ function fakeMain(agentId: string, sessionId: string, answer: (question: string,
 }
 
 const answering = (text: string) => async (): Promise<AskOutcome> => ({ kind: "answer", text, truncated: false });
+
+let warnings: string[] = [];
 const warn = (message: string, error: unknown): void => {
-	throw new Error(`${message}: ${String(error)}`);
+	warnings.push(`${message}: ${String(error)}`);
 };
 
 let added: string[] = [];
 async function add(main: LocalMain): Promise<void> {
 	added.push(main.agentId);
-	await node.add(main, warn);
+	await peers.add(main, warn);
 }
 
 afterEach(async () => {
-	for (const agentId of added) await node.remove(agentId);
+	for (const agentId of added) await peers.remove(agentId);
 	added = [];
+	expect(warnings).toEqual([]);
+	warnings = [];
 });
 
 describe("node lifecycle", () => {
 	test("the endpoint is open while a main session is registered and closes with the last one", async () => {
 		await add(fakeMain("Main", "s-1", answering("x")));
 		await add(fakeMain("acp:2", "s-2", answering("y")));
-		const both = await survey();
+		const both = await survey(DIR);
 		expect(both).toEqual([
 			{
 				pid: process.pid,
@@ -67,20 +76,33 @@ describe("node lifecycle", () => {
 			},
 		]);
 
-		await node.remove("Main");
-		const one = await survey();
+		await peers.remove("Main");
+		const one = await survey(DIR);
 		expect(one[0]?.sessions).toEqual({ kind: "listed", list: [{ sessionId: "s-2", title: "title of s-2", cwd: "/work", idle: true }] });
 
-		await node.remove("acp:2");
-		expect(await survey()).toEqual([]);
-		const after = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "list" }, 1_000);
+		await peers.remove("acp:2");
+		expect(await survey(DIR)).toEqual([]);
+		const after = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "list" }, 1_000);
 		expect(after.kind).toBe("unreachable");
 	});
 
 	test("an endpoint file without a listener is not a peer", async () => {
-		mkdirSync(peersDir(), { recursive: true });
-		writeFileSync(join(peersDir(), "999999.sock"), "");
-		expect(await survey()).toEqual([]);
+		mkdirSync(DIR, { recursive: true });
+		writeFileSync(join(DIR, "999999.sock"), "");
+		expect(await survey(DIR)).toEqual([]);
+	});
+
+	test("a parent directory other users can enter is refused and no endpoint opens", async () => {
+		const open = mkdtempSync(join(tmpdir(), "omp-peers-open-"));
+		chmodSync(open, 0o755);
+		const dir = join(open, "peers");
+		const exposed = new PeerNode(dir);
+		const refusals: string[] = [];
+		await exposed.add(fakeMain("Main", "s-1", answering("x")), (message, error) => refusals.push(`${message}: ${String(error)}`));
+		expect(refusals).toHaveLength(1);
+		expect(refusals[0]).toContain("must be a directory owned by uid");
+		expect(existsSync(endpointFor(dir, process.pid))).toBe(false);
+		await exposed.remove("Main");
 	});
 
 	test("every evaluation of the node module in one process shares one node", async () => {
@@ -95,7 +117,7 @@ describe("transport limits", () => {
 		const main = fakeMain("Main", "s-1", answering("x"));
 		await add(main);
 		const huge = "x".repeat(MAX_FRAME_BYTES + 1);
-		const result = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM, question: huge }, 5_000);
+		const result = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM, question: huge }, 5_000);
 		expect(result.kind).toBe("closed");
 		expect(main.asked).toEqual([]);
 	});
@@ -108,17 +130,17 @@ describe("requests", () => {
 		await add(first);
 		await add(second);
 
-		const asked = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-2", from: FROM, question: "q?" }, 1_000);
+		const asked = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-2", from: FROM, question: "q?" }, 1_000);
 		expect(asked).toEqual({ kind: "response", response: { kind: "answer", text: "second answer", truncated: false } });
 		expect(second.asked).toEqual(["q?"]);
 		expect(first.asked).toEqual([]);
 
-		const sent = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "irc", to: "s-1", from: FROM, message: "hello" }, 1_000);
+		const sent = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "irc", to: "s-1", from: FROM, message: "hello" }, 1_000);
 		expect(sent).toEqual({ kind: "response", response: { kind: "accepted", recipient: "idle" } });
 		expect(first.delivered).toEqual(["hello"]);
 		expect(second.delivered).toEqual([]);
 
-		const missing = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "irc", to: "gone", from: FROM, message: "hello" }, 1_000);
+		const missing = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "irc", to: "gone", from: FROM, message: "hello" }, 1_000);
 		expect(missing.kind === "response" && missing.response.kind === "error" && missing.response.code).toBe("target_not_found");
 	});
 
@@ -130,7 +152,7 @@ describe("requests", () => {
 				return new Promise<AskOutcome>(() => {});
 			}),
 		);
-		const result = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM, question: "slow?" }, 200);
+		const result = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM, question: "slow?" }, 200);
 		expect(result).toEqual({ kind: "timeout", ms: 200 });
 		expect(await aborted).toBe(true);
 	});
@@ -140,9 +162,10 @@ describe("request parsing at the endpoint", () => {
 	test("a request from another protocol version or with a missing field is refused, not served", async () => {
 		const main = fakeMain("Main", "s-1", answering("x"));
 		await add(main);
-		const later = await exchange(process.pid, { v: 2, kind: "list" } as never, 1_000);
+		// Deliberately ill-typed requests: what another plugin version or a broken client could send.
+		const later = await exchange(DIR, process.pid, { v: 2, kind: "list" } as never, 1_000);
 		expect(later.kind === "response" && later.response.kind === "error" && later.response.code).toBe("unsupported_version");
-		const missing = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM } as never, 1_000);
+		const missing = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM } as never, 1_000);
 		expect(missing.kind === "response" && missing.response.kind === "error" && missing.response.code).toBe("bad_request");
 		expect(main.asked).toEqual([]);
 	});

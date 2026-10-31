@@ -3,7 +3,7 @@
 import * as fs from "node:fs/promises";
 import { IpcConnection } from "@oh-my-pi/pi-natives";
 import { errorText } from "./errors.ts";
-import { endpointFor, peersDir } from "./node.ts";
+import { endpointFor } from "./node.ts";
 import { MAX_FRAME_BYTES, parseResponse, type Request, type Response, type SessionInfo } from "./protocol.ts";
 
 const CONNECT_TIMEOUT_MS = 1_000;
@@ -20,11 +20,11 @@ export type Exchange =
 	| { kind: "closed"; reason: string }
 	| { kind: "malformed"; message: string };
 
-export async function exchange(pid: number, request: Request, timeoutMs: number, signal?: AbortSignal): Promise<Exchange> {
+export async function exchange(dir: string, pid: number, request: Request, timeoutMs: number, signal?: AbortSignal): Promise<Exchange> {
 	if (signal?.aborted) return { kind: "cancelled" };
 	let connection: IpcConnection;
 	try {
-		connection = await IpcConnection.connect(endpointFor(pid), {
+		connection = await IpcConnection.connect(endpointFor(dir, pid), {
 			framing: "lines",
 			timeoutMs: CONNECT_TIMEOUT_MS,
 			maxFrameBytes: MAX_FRAME_BYTES,
@@ -56,13 +56,13 @@ export async function exchange(pid: number, request: Request, timeoutMs: number,
 	return await promise;
 }
 
-/** Pids with an endpoint file. A file is only a lead: a crashed peer leaves one behind until its pid is reused. */
-async function endpointPids(): Promise<number[]> {
+/** Pids with an endpoint file. A file is only a lead: a crashed peer leaves one behind until reboot or pid reuse. */
+async function endpointPids(dir: string): Promise<number[]> {
 	let names: string[];
 	try {
-		names = await fs.readdir(peersDir());
+		names = await fs.readdir(dir);
 	} catch (error) {
-		// No peer has ever listened on this machine.
+		// No peer has listened since boot.
 		if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return [];
 		throw error;
 	}
@@ -79,15 +79,15 @@ export type PeerProcess = {
 	sessions: { kind: "listed"; list: readonly SessionInfo[] } | { kind: "unlisted"; reason: string };
 };
 
-/** Every live peer process, each asked for its main sessions. Unreachable endpoints are left out. */
-export async function survey(): Promise<PeerProcess[]> {
-	const pids = await endpointPids();
-	const observed = await Promise.all(pids.map((pid) => observe(pid)));
+/** Every live peer process in `dir`, each asked for its main sessions. Unreachable endpoints are left out. */
+export async function survey(dir: string): Promise<PeerProcess[]> {
+	const pids = await endpointPids(dir);
+	const observed = await Promise.all(pids.map((pid) => observe(dir, pid)));
 	return observed.filter((peer) => peer !== undefined).sort((a, b) => a.pid - b.pid);
 }
 
-async function observe(pid: number): Promise<PeerProcess | undefined> {
-	const result = await exchange(pid, { v: 1, kind: "list" }, LIST_TIMEOUT_MS);
+async function observe(dir: string, pid: number): Promise<PeerProcess | undefined> {
+	const result = await exchange(dir, pid, { v: 1, kind: "list" }, LIST_TIMEOUT_MS);
 	switch (result.kind) {
 		case "unreachable":
 			return undefined;
@@ -113,9 +113,9 @@ export type Target =
 	| { kind: "not_found"; known: readonly string[] }
 	| { kind: "ambiguous"; candidates: readonly { pid: number; sessionId: string }[] };
 
-/** Resolve a session id, or a unique prefix of one, against the live peers at this moment. */
-export async function resolveTarget(to: string): Promise<Target> {
-	const peers = await survey();
+/** Resolve a session id, or a unique prefix of one, against the live peers in `dir` at this moment. */
+export async function resolveTarget(dir: string, to: string): Promise<Target> {
+	const peers = await survey(dir);
 	const known: string[] = [];
 	const exact: { pid: number; session: SessionInfo }[] = [];
 	const prefixed: { pid: number; session: SessionInfo }[] = [];

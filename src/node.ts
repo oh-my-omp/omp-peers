@@ -4,19 +4,40 @@
 //
 // omp evaluates this module again for each ACP session, so module scope is not process scope: the node
 // lives on `globalThis.ompPeersNode`, and every evaluation in the process shares it.
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import { type IpcConnection, IpcServer, ipcEndpoint } from "@oh-my-pi/pi-natives";
-import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
 import { errorText } from "./errors.ts";
 import { MAX_FRAME_BYTES, parseRequest, type Request, type Response, type Sender, type SessionInfo } from "./protocol.ts";
 
-/** Profile-independent, so omp processes of every profile find each other. */
+/**
+ * `/tmp/omp-<uid>/peers`: per user and profile-independent, and emptied at boot like every endpoint in it
+ * (no endpoint outlives its process, and no process outlives the boot). `/tmp/omp-<uid>` is also where
+ * the host's `ipcEndpoint` puts sockets whose path is too long.
+ */
 export function peersDir(): string {
-	return path.join(getBaseConfigRoot(), "run", "peers");
+	return path.join("/tmp", `omp-${os.userInfo().uid}`, "peers");
 }
 
-export function endpointFor(pid: number): string {
-	return ipcEndpoint(peersDir(), String(pid));
+export function endpointFor(dir: string, pid: number): string {
+	return ipcEndpoint(dir, String(pid));
+}
+
+/**
+ * Create the parent of `dir` if missing and refuse it unless this user owns it with mode 0700: under the
+ * world-writable `/tmp`, another user could create it first and then remove or replace endpoints in it.
+ */
+async function claimPrivateParent(dir: string): Promise<void> {
+	const parent = path.dirname(dir);
+	await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+	const stat = await fs.lstat(parent);
+	const uid = os.userInfo().uid;
+	if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o077) !== 0) {
+		throw new Error(
+			`${parent} must be a directory owned by uid ${uid} with mode 0700; found uid ${stat.uid}, mode ${(stat.mode & 0o777).toString(8)}`,
+		);
+	}
 }
 
 export type AskOutcome =
@@ -43,11 +64,17 @@ export interface LocalMain {
 
 export type Warn = (message: string, error: unknown) => void;
 
-class PeerNode {
+/** One process's endpoint and its registered main sessions. Tests build their own on a private directory. */
+export class PeerNode {
+	readonly #dir: string;
 	readonly #mains = new Map<string, LocalMain>();
 	#server: IpcServer | undefined;
 	#reconciling: Promise<void> = Promise.resolve();
 	#warn: Warn = () => {};
+
+	constructor(dir: string) {
+		this.#dir = dir;
+	}
 
 	/** Register a main session (replacing one with the same agent id) and open the endpoint if needed. */
 	add(main: LocalMain, warn: Warn): Promise<void> {
@@ -74,8 +101,9 @@ class PeerNode {
 	async #reconcile(): Promise<void> {
 		try {
 			if (this.#mains.size > 0 && this.#server === undefined) {
+				await claimPrivateParent(this.#dir);
 				const server = await IpcServer.listen(
-					endpointFor(process.pid),
+					endpointFor(this.#dir, process.pid),
 					{ framing: "lines", maxFrameBytes: MAX_FRAME_BYTES },
 					(connection) => this.#accept(connection),
 				);
@@ -172,7 +200,7 @@ declare global {
 	var ompPeersNode: PeerNode | undefined;
 }
 
-globalThis.ompPeersNode ??= new PeerNode();
+globalThis.ompPeersNode ??= new PeerNode(peersDir());
 
 /** The one node of this process, whichever evaluation of this module created it. */
 export const node: PeerNode = globalThis.ompPeersNode;

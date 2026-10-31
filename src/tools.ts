@@ -5,6 +5,7 @@ import { unbridgedOmpPids } from "./candidates.ts";
 import { ASK_TIMEOUT_MS, DELIVER_TIMEOUT_MS, type Exchange, exchange, resolveTarget, survey } from "./client.ts";
 import { errorText } from "./errors.ts";
 import { tr } from "./i18n.ts";
+import { peersDir } from "./node.ts";
 import { MAX_ANSWER_BYTES, MAX_TEXT_BYTES, PROTOCOL_VERSION, type Sender, type SessionInfo } from "./protocol.ts";
 import { topicsFor } from "./topics.ts";
 
@@ -33,7 +34,7 @@ function sessionLine(session: SessionInfo, you: string): string {
 
 async function list(ctx: ExtensionContext): Promise<Result> {
 	const you = ctx.sessionManager.getSessionId();
-	const peers = await survey();
+	const peers = await survey(peersDir());
 	const lines: string[] = [];
 	let mains = 0;
 	for (const peer of peers) {
@@ -62,7 +63,7 @@ async function target(
 	to: string,
 	ctx: ExtensionContext,
 ): Promise<{ kind: "ok"; pid: number; sessionId: string } | { kind: "refused"; result: Result }> {
-	const resolved = await resolveTarget(to);
+	const resolved = await resolveTarget(peersDir(), to);
 	switch (resolved.kind) {
 		case "not_found":
 			return {
@@ -104,7 +105,7 @@ async function ask(params: { to: string; question: string }, signal: AbortSignal
 	const resolved = await target(params.to, ctx);
 	if (resolved.kind === "refused") return resolved.result;
 	const request = { v: PROTOCOL_VERSION, kind: "ask", to: resolved.sessionId, from: self(ctx), question: params.question } as const;
-	const result = await exchange(resolved.pid, request, ASK_TIMEOUT_MS, signal);
+	const result = await exchange(peersDir(), resolved.pid, request, ASK_TIMEOUT_MS, signal);
 	if (result.kind !== "response") return failure(result, resolved.sessionId);
 	const response = result.response;
 	switch (response.kind) {
@@ -124,7 +125,7 @@ async function send(params: { to: string; message: string }, signal: AbortSignal
 	const resolved = await target(params.to, ctx);
 	if (resolved.kind === "refused") return resolved.result;
 	const request = { v: PROTOCOL_VERSION, kind: "irc", to: resolved.sessionId, from: self(ctx), message: params.message } as const;
-	const result = await exchange(resolved.pid, request, DELIVER_TIMEOUT_MS, signal);
+	const result = await exchange(peersDir(), resolved.pid, request, DELIVER_TIMEOUT_MS, signal);
 	if (result.kind !== "response") return failure(result, resolved.sessionId);
 	const response = result.response;
 	switch (response.kind) {

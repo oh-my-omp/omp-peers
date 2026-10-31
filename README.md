@@ -28,7 +28,7 @@ Tool labels follow the UI language: `OMOMP_LANG` (`en` or `zh`), then the `omomp
 
 ## How it works
 
-- Each omp process with at least one main session listens on `~/.omp/run/peers/<pid>.sock`. The directory is profile-independent, so every profile of the user shares it; the socket is `0600` and accepts the same user only.
+- Each omp process with at least one main session listens on `/tmp/omp-<uid>/peers/<pid>.sock`. The directory is per user and profile-independent, so every profile of the user shares it, and `/tmp` is emptied at boot, which no endpoint needs to outlive. `/tmp/omp-<uid>` must be owned by the user with mode `0700`, otherwise no endpoint is opened and omp logs a warning; the socket is `0600` and accepts the same user only.
 - A process is alive when its socket accepts a connection. There is no heartbeat, registry or cache: every tool call reads the peers at that moment.
 - One connection carries one JSON request line (`list`, `ask`, `irc`) and one JSON response line.
 - One side question per target session at a time; a second gets `ask_busy`. Questions and messages are capped at 64 KiB, answers at 32 KiB (cut answers are marked).
@@ -37,7 +37,7 @@ Tool labels follow the UI language: `OMOMP_LANG` (`en` or `zh`), then the `omomp
 
 ## Exit and leftovers
 
-The socket is removed when the last main session of the process shuts down. With omp in TUI mode that covers `/quit`, a double Ctrl+C and `kill` with TERM, HUP or INT. `kill -9`, and signals to omp in RPC mode, skip the shutdown hook and leave the socket file behind. It refuses connections, so it is never listed as alive, and the next process with that pid takes the path over.
+The socket is removed when the last main session of the process shuts down. With omp in TUI mode that covers `/quit`, a double Ctrl+C and `kill` with TERM, HUP or INT. `kill -9`, and signals to omp in RPC mode, skip the shutdown hook and leave the socket file behind. It refuses connections, so it is never listed as alive; it stays until reboot empties `/tmp`, or the next process with that pid takes the path over.
 
 ## Trust
 
@@ -51,4 +51,4 @@ bun run check
 bun test
 ```
 
-For local runs, load the entry directly: `omp -e ./index.ts`. Tests run with a private `HOME`, so they do not join the real peer set.
+For local runs, load the entry directly: `omp -e ./index.ts`. Tests run their own node on a private temporary directory, so they do not join the real peer set.

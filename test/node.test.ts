@@ -2,8 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { exchange, survey } from "../src/client.ts";
+import type * as NodeModule from "../src/node.ts";
 import { type AskOutcome, type LocalMain, node, peersDir } from "../src/node.ts";
-import { PROTOCOL_VERSION, type Sender, truncateUtf8 } from "../src/protocol.ts";
+import { MAX_FRAME_BYTES, PROTOCOL_VERSION, type Sender, truncateUtf8 } from "../src/protocol.ts";
 
 const FROM: Sender = { pid: 1, sessionId: "asker", cwd: "/tmp" };
 
@@ -80,6 +81,23 @@ describe("node lifecycle", () => {
 		mkdirSync(peersDir(), { recursive: true });
 		writeFileSync(join(peersDir(), "999999.sock"), "");
 		expect(await survey()).toEqual([]);
+	});
+
+	test("every evaluation of the node module in one process shares one node", async () => {
+		// omp evaluates the plugin again per ACP session; a second evaluation must not open a second endpoint.
+		const again: typeof NodeModule = await import(`../src/node.ts?evaluation=${Date.now()}`);
+		expect(again.node).toBe(node);
+	});
+});
+
+describe("transport limits", () => {
+	test("a request line over the frame cap closes the connection before it is parsed", async () => {
+		const main = fakeMain("Main", "s-1", answering("x"));
+		await add(main);
+		const huge = "x".repeat(MAX_FRAME_BYTES + 1);
+		const result = await exchange(process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM, question: huge }, 5_000);
+		expect(result.kind).toBe("closed");
+		expect(main.asked).toEqual([]);
 	});
 });
 

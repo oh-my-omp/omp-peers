@@ -1,6 +1,9 @@
 // The process-level node: one IPC endpoint per omp process at `<peers dir>/<pid>.sock`, serving every
 // main session of the process that registered with it. The endpoint is open exactly while at least one
 // main session is registered; `reconcile` moves the listener to that state after every change.
+//
+// omp evaluates this module again for each ACP session, so module scope is not process scope: the node
+// lives on `globalThis.ompPeersNode`, and every evaluation in the process shares it.
 import * as path from "node:path";
 import { type IpcConnection, IpcServer, ipcEndpoint } from "@oh-my-pi/pi-natives";
 import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
@@ -164,5 +167,12 @@ function assertNever(value: never): never {
 	throw new Error(`unhandled variant: ${JSON.stringify(value)}`);
 }
 
-/** The node of this process; every extension binding of the process shares it through the module cache. */
-export const node = new PeerNode();
+declare global {
+	/** omp-peers' process node, shared by every evaluation of this module in the process. */
+	var ompPeersNode: PeerNode | undefined;
+}
+
+globalThis.ompPeersNode ??= new PeerNode();
+
+/** The one node of this process, whichever evaluation of this module created it. */
+export const node: PeerNode = globalThis.ompPeersNode;

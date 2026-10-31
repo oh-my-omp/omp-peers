@@ -1,0 +1,168 @@
+// The process-level node: one IPC endpoint per omp process at `<peers dir>/<pid>.sock`, serving every
+// main session of the process that registered with it. The endpoint is open exactly while at least one
+// main session is registered; `reconcile` moves the listener to that state after every change.
+import * as path from "node:path";
+import { type IpcConnection, IpcServer, ipcEndpoint } from "@oh-my-pi/pi-natives";
+import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
+import { errorText } from "./errors.ts";
+import { MAX_FRAME_BYTES, parseRequest, type Request, type Response, type Sender, type SessionInfo } from "./protocol.ts";
+
+/** Profile-independent, so omp processes of every profile find each other. */
+export function peersDir(): string {
+	return path.join(getBaseConfigRoot(), "run", "peers");
+}
+
+export function endpointFor(pid: number): string {
+	return ipcEndpoint(peersDir(), String(pid));
+}
+
+export type AskOutcome =
+	| { kind: "answer"; text: string; truncated: boolean }
+	| { kind: "busy" }
+	| { kind: "unsupported" }
+	| { kind: "failed"; message: string };
+
+/** A main session of this process. Identity and state are read live, so `/new` and resume need no re-registration. */
+export interface LocalMain {
+	/** Registry id, stable for the lifetime of the session runtime: `Main`, or `acp:<id>` under ACP. */
+	readonly agentId: string;
+	sessionId(): string;
+	title(): string | undefined;
+	cwd(): string;
+	idle(): boolean;
+	/** Answer a side question without touching the main turn or transcript. */
+	ask(question: string, from: Sender, signal: AbortSignal): Promise<AskOutcome>;
+	/** Inject an IRC message into the main session; returns its state at injection. */
+	deliver(message: string, from: Sender): "idle" | "busy";
+	/** Abort an in-flight side question; called when the session leaves the node. */
+	stop(): void;
+}
+
+export type Warn = (message: string, error: unknown) => void;
+
+class PeerNode {
+	readonly #mains = new Map<string, LocalMain>();
+	#server: IpcServer | undefined;
+	#reconciling: Promise<void> = Promise.resolve();
+	#warn: Warn = () => {};
+
+	/** Register a main session (replacing one with the same agent id) and open the endpoint if needed. */
+	add(main: LocalMain, warn: Warn): Promise<void> {
+		this.#warn = warn;
+		this.#mains.get(main.agentId)?.stop();
+		this.#mains.set(main.agentId, main);
+		return this.#schedule();
+	}
+
+	/** Unregister a main session; the last one out closes the endpoint. Idempotent. */
+	remove(agentId: string): Promise<void> {
+		const main = this.#mains.get(agentId);
+		if (main === undefined) return this.#reconciling;
+		main.stop();
+		this.#mains.delete(agentId);
+		return this.#schedule();
+	}
+
+	#schedule(): Promise<void> {
+		this.#reconciling = this.#reconciling.then(() => this.#reconcile());
+		return this.#reconciling;
+	}
+
+	async #reconcile(): Promise<void> {
+		try {
+			if (this.#mains.size > 0 && this.#server === undefined) {
+				const server = await IpcServer.listen(
+					endpointFor(process.pid),
+					{ framing: "lines", maxFrameBytes: MAX_FRAME_BYTES },
+					(connection) => this.#accept(connection),
+				);
+				// The endpoint never keeps omp alive; omp's own exit path closes it.
+				server.unref();
+				this.#server = server;
+			} else if (this.#mains.size === 0 && this.#server !== undefined) {
+				const server = this.#server;
+				this.#server = undefined;
+				await server.close();
+			}
+		} catch (error) {
+			this.#warn("omp-peers endpoint change failed", error);
+		}
+	}
+
+	#accept(connection: IpcConnection): void {
+		connection.unref();
+		const closed = new AbortController();
+		let answered = false;
+		connection.start(
+			(line) => {
+				if (answered) return;
+				answered = true;
+				void this.#respond(line, closed.signal).then((response) => {
+					connection.send(JSON.stringify(response));
+					connection.end();
+				});
+			},
+			() => closed.abort(),
+		);
+	}
+
+	async #respond(line: string, closed: AbortSignal): Promise<Response> {
+		const parsed = parseRequest(line);
+		if (parsed.kind === "invalid") return { kind: "error", code: parsed.code, message: parsed.message };
+		try {
+			return await this.#serve(parsed.value, closed);
+		} catch (error) {
+			this.#warn("omp-peers request failed", error);
+			return { kind: "error", code: parsed.value.kind === "irc" ? "delivery_failed" : "ask_failed", message: errorText(error) };
+		}
+	}
+
+	async #serve(request: Request, closed: AbortSignal): Promise<Response> {
+		switch (request.kind) {
+			case "list":
+				return { kind: "sessions", pid: process.pid, sessions: [...this.#mains.values()].map(sessionInfo) };
+			case "ask": {
+				const main = this.#target(request.to);
+				if (main === undefined) return notFound(request.to);
+				const outcome = await main.ask(request.question, request.from, closed);
+				switch (outcome.kind) {
+					case "answer":
+						return { kind: "answer", text: outcome.text, truncated: outcome.truncated };
+					case "busy":
+						return { kind: "error", code: "ask_busy", message: "this session is already answering another side question" };
+					case "unsupported":
+						return { kind: "error", code: "ask_unsupported", message: "this omp provides no side turns (runEphemeralTurn)" };
+					case "failed":
+						return { kind: "error", code: "ask_failed", message: outcome.message };
+				}
+				return assertNever(outcome);
+			}
+			case "irc": {
+				const main = this.#target(request.to);
+				if (main === undefined) return notFound(request.to);
+				return { kind: "accepted", recipient: main.deliver(request.message, request.from) };
+			}
+		}
+		return assertNever(request);
+	}
+
+	#target(sessionId: string): LocalMain | undefined {
+		for (const main of this.#mains.values()) if (main.sessionId() === sessionId) return main;
+		return undefined;
+	}
+}
+
+function sessionInfo(main: LocalMain): SessionInfo {
+	return { sessionId: main.sessionId(), title: main.title(), cwd: main.cwd(), idle: main.idle() };
+}
+
+function notFound(sessionId: string): Response {
+	return { kind: "error", code: "target_not_found", message: `no main session ${sessionId} in pid ${process.pid}` };
+}
+
+function assertNever(value: never): never {
+	throw new Error(`unhandled variant: ${JSON.stringify(value)}`);
+}
+
+/** The node of this process; every extension binding of the process shares it through the module cache. */
+export const node = new PeerNode();

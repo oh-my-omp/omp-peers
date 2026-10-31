@@ -1,0 +1,39 @@
+{
+	"name": "omp-peers",
+	"version": "0.1.0",
+	"description": "Lets the omp main agents of one user find each other, ask /btw-style side questions and exchange IRC messages across processes",
+	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/oh-my-omp/omp-peers.git"
+	},
+	"files": [
+		"index.ts",
+		"src"
+	],
+	"omp": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"scripts": {
+		"check": "biome check . && tsc --noEmit",
+		"format": "biome check --write .",
+		"test": "bun test"
+	},
+	"peerDependencies": {
+		"@oh-my-pi/pi-agent-core": "*",
+		"@oh-my-pi/pi-coding-agent": "*",
+		"@oh-my-pi/pi-natives": "*",
+		"@oh-my-pi/pi-utils": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "latest",
+		"@oh-my-pi/pi-agent-core": "latest",
+		"@oh-my-pi/pi-coding-agent": "latest",
+		"@oh-my-pi/pi-natives": "latest",
+		"@oh-my-pi/pi-utils": "latest",
+		"@types/bun": "latest",
+		"typescript": "latest"
+	}
+}

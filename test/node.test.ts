@@ -5,36 +5,42 @@ import { join } from "node:path";
 import { exchange, survey } from "../src/client.ts";
 import type * as NodeModule from "../src/node.ts";
 import { type AskOutcome, endpointFor, type LocalMain, node, PeerNode } from "../src/node.ts";
-import { MAX_FRAME_BYTES, PROTOCOL_VERSION, type Sender, truncateUtf8 } from "../src/protocol.ts";
+import { MAX_FRAME_BYTES, PROTOCOL_VERSION, type Sender, truncateUtf8, type WireRequest } from "../src/protocol.ts";
 
 // A private peers directory, so tests never join the user's real peers under /tmp/omp-<uid>.
 const DIR = join(mkdtempSync(join(tmpdir(), "omp-peers-node-")), "peers");
 const peers = new PeerNode(DIR);
 
-const FROM: Sender = { pid: 1, sessionId: "asker", cwd: "/tmp" };
+const FROM = { pid: 1, sessionId: "asker", cwd: "/tmp" } satisfies Extract<WireRequest, { kind: "ask" }>["from"];
 
-type FakeMain = LocalMain & { asked: string[]; delivered: string[] };
+type FakeMain = LocalMain & { asked: string[]; delivered: string[]; askSenders: Sender[]; deliverySenders: Sender[] };
 
 function fakeMain(agentId: string, sessionId: string, answer: (question: string, signal: AbortSignal) => Promise<AskOutcome>): FakeMain {
 	const asked: string[] = [];
 	const delivered: string[] = [];
+	const askSenders: Sender[] = [];
+	const deliverySenders: Sender[] = [];
 	return {
 		agentId,
 		sessionId: () => sessionId,
 		title: () => `title of ${sessionId}`,
 		cwd: () => "/work",
 		idle: () => true,
-		ask: (question, _from, signal) => {
+		ask: (question, from, signal) => {
 			asked.push(question);
+			askSenders.push(from);
 			return answer(question, signal);
 		},
-		deliver: (message) => {
+		deliver: (message, from) => {
 			delivered.push(message);
+			deliverySenders.push(from);
 			return "idle";
 		},
 		stop: () => {},
 		asked,
 		delivered,
+		askSenders,
+		deliverySenders,
 	};
 }
 
@@ -159,6 +165,27 @@ describe("requests", () => {
 });
 
 describe("request parsing at the endpoint", () => {
+	test("legacy senders parse as main and subagent senders retain their identity through ask and irc delivery", async () => {
+		const main = fakeMain("Main", "s-1", answering("answer"));
+		await add(main);
+		const subagent = { ...FROM, subagent: "AreaManager" };
+		for (const from of [FROM, subagent]) {
+			expect(await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from, question: "identity?" }, 1_000)).toEqual(
+				{ kind: "response", response: { kind: "answer", text: "answer", truncated: false } },
+			);
+			expect(await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "irc", to: "s-1", from, message: "identity" }, 1_000)).toEqual({
+				kind: "response",
+				response: { kind: "accepted", recipient: "idle" },
+			});
+		}
+		const expected: Sender[] = [
+			{ kind: "main", ...FROM },
+			{ kind: "sub", agentId: "AreaManager", ...FROM },
+		];
+		expect(main.askSenders).toEqual(expected);
+		expect(main.deliverySenders).toEqual(expected);
+	});
+
 	test("a request from another protocol version or with a missing field is refused, not served", async () => {
 		const main = fakeMain("Main", "s-1", answering("x"));
 		await add(main);

@@ -7,26 +7,38 @@ import { MAX_ANSWER_BYTES, type Sender, truncateUtf8 } from "./protocol.ts";
 
 function describeSender(from: Sender): string {
 	const title = from.title === undefined ? "" : ` "${from.title}"`;
-	return `session ${from.sessionId}${title}, pid ${from.pid}, cwd ${from.cwd}`;
+	const origin = `session ${from.sessionId}${title}, pid ${from.pid}, cwd ${from.cwd}`;
+	return from.kind === "sub" ? `subagent ${from.agentId} of omp process (${origin})` : origin;
 }
 
 function askPrompt(question: string, from: Sender): string {
 	return [
-		`Side question from another omp main agent (${describeSender(from)}):`,
+		from.kind === "sub"
+			? `Side question from an omp subagent (${describeSender(from)}):`
+			: `Side question from another omp main agent (${describeSender(from)}):`,
 		"",
 		question,
 		"",
 		"Answer it from your current context. This is a /btw-style side turn: the answer goes back to the asker only, it is not added to your conversation, and you cannot call tools here.",
+		...(from.kind === "sub"
+			? [
+					"This is one-way communication from a subagent: return your answer through this side turn only. Do not use peer_send to reply; the subagent is not a registered peer.",
+				]
+			: []),
 	].join("\n");
 }
 
 function ircContent(message: string, from: Sender): string {
 	return [
-		`Incoming peer message from another omp main agent (${describeSender(from)}):`,
+		from.kind === "sub"
+			? `Incoming peer message from an omp subagent (${describeSender(from)}):`
+			: `Incoming peer message from another omp main agent (${describeSender(from)}):`,
 		"",
 		message,
 		"",
-		`It came through omp-peers, not the Agent Hub: \`agent://\` cannot reach the sender and \`wait\` does not wait for it. If a response is expected, call peer_send with to "${from.sessionId}"; the sender's reply wakes you when it arrives.`,
+		from.kind === "sub"
+			? "It came through omp-peers, not the Agent Hub. This is a one-way message from a subagent: do not use peer_send to reply. The subagent is not a registered peer; agent:// and wait cannot reach it across processes."
+			: `It came through omp-peers, not the Agent Hub: \`agent://\` cannot reach the sender and \`wait\` does not wait for it. If a response is expected, call peer_send with to "${from.sessionId}"; the sender's reply wakes you when it arrives.`,
 	].join("\n");
 }
 
@@ -67,7 +79,13 @@ export function localMain(pi: ExtensionAPI, ctx: ExtensionContext): LocalMain {
 				content: ircContent(message, from),
 				display: true,
 				// The host's IRC card renders `from` and `message`; the model reads `content`.
-				details: { from: `${from.title ?? from.sessionId} (pid ${from.pid})`, message },
+				details: {
+					from:
+						from.kind === "sub"
+							? `subagent ${from.agentId} — ${from.title ?? from.sessionId} (pid ${from.pid})`
+							: `${from.title ?? from.sessionId} (pid ${from.pid})`,
+					message,
+				},
 			},
 			// aside: idle starts a turn; streaming reads it at the next step without breaking the tool batch.
 			{ deliverAs: "aside", triggerTurn: true },

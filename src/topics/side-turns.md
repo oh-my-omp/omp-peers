@@ -1,5 +1,6 @@
 # Side questions
 
+- Main sessions and subagents can ask main sessions. A subagent's question identifies its process and registry id and is one-way: the side answer returns through this call only. Do not use `peer_send` to reply to a subagent; it is not a registered peer.
 - The target answers in a /btw-style side turn: its own model, system prompt and conversation, including output it is producing right now. The side turn runs alongside its main turn, adds nothing to its conversation and cannot call tools.
 - It still costs the target's model usage and runs its context hooks, so ask what you need, not idle chatter.
 - One side question per target session at a time. `ask_busy` means another one is being answered; ask again later.

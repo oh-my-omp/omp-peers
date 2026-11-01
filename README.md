@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Lets the omp main sessions of one OS user find each other across processes, ask each other /btw-style side questions, and exchange IRC messages. omp's own Agent Hub (`agent://`, `wait`) only reaches agents inside one omp process; omp-peers connects the processes.
+Lets the omp main sessions and subagents of one OS user discover main sessions across processes, ask /btw-style side questions, and send IRC messages. Only main sessions register as peers; subagent communication is one-way. omp's own Agent Hub (`agent://`, `wait`) only reaches agents inside one omp process; omp-peers connects the processes.
 
 ## Install
 
@@ -14,13 +14,13 @@ The entry is the package-root `index.ts`, declared by `omp.extensions` in `packa
 
 ## Tools
 
-Main sessions get three tools; subagents are not peers and get a refusal.
+Main sessions and subagents can use all three tools. Only main sessions register as peers and can receive requests. Subagents identify themselves by their process and registry id: `peer_ask` returns the side answer through the call, but recipients must not use `peer_send` to reply to a subagent.
 
 | Tool | Effect on the target session |
 |---|---|
 | `peer_list` | None. Lists the live omp processes running omp-peers with their main sessions (id, title, cwd, idle or busy), and omp processes without omp-peers as candidates. |
 | `peer_ask` | Answers in a side turn through omp's /btw executor (`runEphemeralTurn`): its model, system prompt and conversation, including output it is producing. Nothing is added to its conversation, its main turn is not interrupted, and no tools run. It does cost the target's model usage. |
-| `peer_send` | Injects an IRC message into its conversation as an `irc:incoming` card, delivered as an aside: an idle session starts a turn, a busy one reads it at its next step without its running tools being interrupted. The receiver replies with `peer_send`. |
+| `peer_send` | Injects an IRC message into its conversation as an `irc:incoming` card, delivered as an aside: an idle session starts a turn, a busy one reads it at its next step without its running tools being interrupted. The receiver can reply to a main sender with `peer_send`; messages from subagents are explicitly marked one-way and must not be replied to. |
 
 Sessions are addressed by session id, or a unique prefix. The id changes on `/new` and resume; a request to an old id fails with `target_not_found`. Detailed model-facing rules are the tool topics in `src/topics/`.
 

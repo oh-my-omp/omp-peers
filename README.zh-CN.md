@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-让同一 OS 用户下各个 omp 进程的主会话互相发现，互相发起 /btw 式旁路询问，并互发 IRC 消息。omp 自带的 Agent Hub（`agent://`、`wait`）只能触达同一个 omp 进程内的 agent；omp-peers 把各个进程连起来。
+让同一 OS 用户下各个 omp 进程的主会话和子代理发现主会话，发起 /btw 式旁路询问，并发送 IRC 消息。只有主会话注册为 peer；子代理通信是单向的。omp 自带的 Agent Hub（`agent://`、`wait`）只能触达同一个 omp 进程内的 agent；omp-peers 把各个进程连起来。
 
 ## 安装
 
@@ -14,13 +14,13 @@ omp install https://github.com/oh-my-omp/omp-peers
 
 ## 工具
 
-主会话可以使用三个工具。子代理不算 peer，调用这些工具会被拒绝。
+主会话和子代理都可以使用三个工具。只有主会话注册为 peer 并接收请求。子代理通过所属进程和 registry id 标识发送方：`peer_ask` 的旁路回答通过调用返回，但接收方不得用 `peer_send` 回复子代理。
 
 | 工具 | 对目标会话的影响 |
 |---|---|
 | `peer_list` | 没有影响。列出运行 omp-peers 的存活 omp 进程及其主会话（id、标题、cwd、空闲或忙碌），没装 omp-peers 的 omp 进程只作为候选列出。 |
 | `peer_ask` | 目标通过 omp 的 /btw 执行器（`runEphemeralTurn`）在旁路回合里作答，使用它自己的模型、system prompt 和对话，包括它此刻正在输出的内容。不会往它的对话里追加任何东西，不会打断它的主回合，也不会执行工具；但会消耗目标的模型用量。 |
-| `peer_send` | 把一条 IRC 消息以 `irc:incoming` 卡片注入目标对话，按 aside 投递：空闲的会话会因此开始一轮，忙碌的会话在下一个 step 读到，正在运行的工具不会被打断。接收方用 `peer_send` 回复。 |
+| `peer_send` | 把一条 IRC 消息以 `irc:incoming` 卡片注入目标对话，按 aside 投递：空闲的会话会因此开始一轮，忙碌的会话在下一个 step 读到，正在运行的工具不会被打断。接收方可用 `peer_send` 回复主会话发送方；来自子代理的消息明确标记为单向，不得回复。 |
 
 用 session id 或其唯一前缀寻址会话。`/new` 和 resume 会更换 id，发给旧 id 的请求会以 `target_not_found` 失败。给模型看的详细规则写在 `src/topics/` 下的工具 topic 里。
 

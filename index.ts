@@ -1,6 +1,6 @@
 /**
- * omp-peers: the main sessions of one user's omp processes find each other, ask each other
- * /btw-style side questions and exchange IRC messages.
+ * omp-peers: main sessions and subagents of one user's omp processes discover main sessions,
+ * ask /btw-style side questions and send IRC messages. Subagents communicate one-way only.
  *
  * Process node (src/node.ts): one IPC endpoint per omp process, `/tmp/omp-<uid>/peers/<pid>.sock`
  * (per user, profile-independent, emptied at boot), open while at least one main session of the process is registered.
@@ -13,9 +13,11 @@
  * `kill -9` and omp's RPC-mode signal exits skip `session_shutdown`; the endpoint file left
  * behind refuses connections and stays until reboot empties `/tmp`, or the next process with that pid takes it over.
  *
- * Tools (main sessions only): `peer_list`, `peer_ask` (the target answers through the host's
- * side turn, `ctx.runEphemeralTurn`, without touching its conversation) and `peer_send` (an
- * `irc:incoming` custom message injected with `pi.sendMessage`, delivered as an aside).
+ * Tools (main sessions and subagents): `peer_list`, `peer_ask` (the target answers through the
+ * host's side turn, `ctx.runEphemeralTurn`, without touching its conversation) and `peer_send`
+ * (an `irc:incoming` custom message injected with `pi.sendMessage`, delivered as an aside).
+ * Only main sessions register as peers. Subagent senders carry their registry id; recipients
+ * return side answers through the ask call, but must not use peer_send to reply to subagents.
  *
  * Files: the endpoint above; reads omp's project presence records under
  * `~/.omp/run/daemons/<scope>/clients/` to report omp processes without omp-peers.

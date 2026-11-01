@@ -1,4 +1,6 @@
 // The three model-facing tools. Each call reads the live peers at that moment; nothing is cached.
+// Main sessions and subagents both call them; only a main session is a peer that can be answered by
+// `peer_send`, so a subagent asks and sends one-way.
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { type ExtensionContext, type ToolDefinition, z } from "@oh-my-pi/pi-coding-agent";
 import { unbridgedOmpPids } from "./candidates.ts";
@@ -6,7 +8,7 @@ import { ASK_TIMEOUT_MS, DELIVER_TIMEOUT_MS, type Exchange, exchange, resolveTar
 import { errorText } from "./errors.ts";
 import { tr } from "./i18n.ts";
 import { peersDir } from "./node.ts";
-import { MAX_ANSWER_BYTES, MAX_TEXT_BYTES, PROTOCOL_VERSION, type Sender, type SessionInfo } from "./protocol.ts";
+import { MAX_ANSWER_BYTES, MAX_TEXT_BYTES, PROTOCOL_VERSION, type Sender, type SessionInfo, senderWire } from "./protocol.ts";
 import { topicsFor } from "./topics.ts";
 
 type Result = AgentToolResult<Record<string, never>>;
@@ -18,12 +20,18 @@ const text = (body: string, isError = false): Result => ({
 });
 
 function self(ctx: ExtensionContext): Sender {
-	return {
+	const origin = {
 		pid: process.pid,
 		sessionId: ctx.sessionManager.getSessionId(),
 		title: ctx.sessionManager.getSessionName(),
 		cwd: ctx.sessionManager.getCwd(),
 	};
+	switch (ctx.agent.kind) {
+		case "main":
+			return { kind: "main", ...origin };
+		case "sub":
+			return { kind: "sub", agentId: ctx.agent.id, ...origin };
+	}
 }
 
 function sessionLine(session: SessionInfo, you: string): string {
@@ -104,7 +112,13 @@ function failure(result: Exclude<Exchange, { kind: "response" }>, sessionId: str
 async function ask(params: { to: string; question: string }, signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<Result> {
 	const resolved = await target(params.to, ctx);
 	if (resolved.kind === "refused") return resolved.result;
-	const request = { v: PROTOCOL_VERSION, kind: "ask", to: resolved.sessionId, from: self(ctx), question: params.question } as const;
+	const request = {
+		v: PROTOCOL_VERSION,
+		kind: "ask",
+		to: resolved.sessionId,
+		from: senderWire(self(ctx)),
+		question: params.question,
+	} as const;
 	const result = await exchange(peersDir(), resolved.pid, request, ASK_TIMEOUT_MS, signal);
 	if (result.kind !== "response") return failure(result, resolved.sessionId);
 	const response = result.response;
@@ -124,7 +138,8 @@ async function ask(params: { to: string; question: string }, signal: AbortSignal
 async function send(params: { to: string; message: string }, signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<Result> {
 	const resolved = await target(params.to, ctx);
 	if (resolved.kind === "refused") return resolved.result;
-	const request = { v: PROTOCOL_VERSION, kind: "irc", to: resolved.sessionId, from: self(ctx), message: params.message } as const;
+	const from = self(ctx);
+	const request = { v: PROTOCOL_VERSION, kind: "irc", to: resolved.sessionId, from: senderWire(from), message: params.message } as const;
 	const result = await exchange(peersDir(), resolved.pid, request, DELIVER_TIMEOUT_MS, signal);
 	if (result.kind !== "response") return failure(result, resolved.sessionId);
 	const response = result.response;
@@ -132,9 +147,11 @@ async function send(params: { to: string; message: string }, signal: AbortSignal
 		case "accepted": {
 			const state =
 				response.recipient === "idle" ? "It was idle and starts a turn on it now." : "It was busy and reads it at its next step.";
-			return text(
-				`Delivered to session ${resolved.sessionId} (pid ${resolved.pid}). ${state} A reply arrives as an incoming peer message and wakes you; do not \`wait\` for it.`,
-			);
+			const replies =
+				from.kind === "main"
+					? "A reply arrives as an incoming peer message and wakes you; do not `wait` for it."
+					: "You are a subagent, so this was one-way: the recipient cannot reply to you.";
+			return text(`Delivered to session ${resolved.sessionId} (pid ${resolved.pid}). ${state} ${replies}`);
 		}
 		case "error":
 			return text(`Not delivered to session ${resolved.sessionId}: ${response.code}: ${response.message}`, true);
@@ -158,9 +175,8 @@ const sendParams = z.object({ to: toParam, message: boundedText("The message") }
 
 type Topics = { docTopics(): Readonly<Record<string, string>> };
 
-/** Main sessions only: a subagent is not a peer and has no address to reply to. */
-async function guarded(ctx: ExtensionContext, run: () => Promise<Result>): Promise<Result> {
-	if (ctx.agent.kind !== "main") return text("omp-peers tools are for main sessions only.", true);
+/** Turn a thrown error into an error result: tools never throw into omp. */
+async function guarded(run: () => Promise<Result>): Promise<Result> {
 	try {
 		return await run();
 	} catch (error) {
@@ -175,36 +191,39 @@ export const peerTools = () =>
 			name: "peer_list",
 			label: tr("Peers", "Peer 列表"),
 			description: `Lists the live omp processes of this user that run omp-peers and their main sessions (id, title, cwd, idle or busy), plus omp processes without omp-peers.
+Available to main sessions and subagents; only main sessions register as peers.
 
 Topics — read the one a call needs before making it:
 - \`xd://peer_list/liveness\` — before relying on who is alive, or when a process shows no session list`,
 			parameters: listParams,
 			approval: "read",
 			docTopics: () => topicsFor("peer_list"),
-			execute: (_id, _params, _signal, _onUpdate, ctx) => guarded(ctx, () => list(ctx)),
+			execute: (_id, _params, _signal, _onUpdate, ctx) => guarded(() => list(ctx)),
 		} satisfies ToolDefinition<typeof listParams> & Topics,
 		{
 			name: "peer_ask",
 			label: tr("Ask peer", "询问 peer"),
 			description: `Asks another omp main session a /btw-style side question and returns its answer; the target answers from its current context without adding anything to its conversation.
+Available to main sessions and subagents. A subagent's question is one-way: the answer returns through this call, but the recipient cannot peer_send back to the subagent.
 
 Topics — read the one a call needs before making it:
 - \`xd://peer_ask/side-turns\` — before asking, or when an ask fails or comes back cut`,
 			parameters: askParams,
 			approval: "read",
 			docTopics: () => topicsFor("peer_ask"),
-			execute: (_id, params, signal, _onUpdate, ctx) => guarded(ctx, () => ask(params, signal, ctx)),
+			execute: (_id, params, signal, _onUpdate, ctx) => guarded(() => ask(params, signal, ctx)),
 		} satisfies ToolDefinition<typeof askParams> & Topics,
 		{
 			name: "peer_send",
 			label: tr("Message peer", "发消息给 peer"),
 			description: `Sends an IRC message to another omp main session: it enters that session's conversation, waking it when idle.
+Available to main sessions and subagents. Messages from subagents are one-way: recipients must not peer_send a reply.
 
 Topics — read the one a call needs before making it:
 - \`xd://peer_send/replies\` — before sending, and before replying to an incoming peer message`,
 			parameters: sendParams,
 			approval: "write",
 			docTopics: () => topicsFor("peer_send"),
-			execute: (_id, params, signal, _onUpdate, ctx) => guarded(ctx, () => send(params, signal, ctx)),
+			execute: (_id, params, signal, _onUpdate, ctx) => guarded(() => send(params, signal, ctx)),
 		} satisfies ToolDefinition<typeof sendParams> & Topics,
 	] as const;

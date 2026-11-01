@@ -4,7 +4,7 @@ import * as fs from "node:fs/promises";
 import { IpcConnection } from "@oh-my-pi/pi-natives";
 import { errorText } from "./errors.ts";
 import { endpointFor } from "./node.ts";
-import { MAX_FRAME_BYTES, parseResponse, type Request, type Response, type SessionInfo } from "./protocol.ts";
+import { MAX_FRAME_BYTES, parseResponse, type Response, type SessionInfo, type WireRequest } from "./protocol.ts";
 
 const CONNECT_TIMEOUT_MS = 1_000;
 export const LIST_TIMEOUT_MS = 2_000;
@@ -20,7 +20,7 @@ export type Exchange =
 	| { kind: "closed"; reason: string }
 	| { kind: "malformed"; message: string };
 
-export async function exchange(dir: string, pid: number, request: Request, timeoutMs: number, signal?: AbortSignal): Promise<Exchange> {
+export async function exchange(dir: string, pid: number, request: WireRequest, timeoutMs: number, signal?: AbortSignal): Promise<Exchange> {
 	if (signal?.aborted) return { kind: "cancelled" };
 	let connection: IpcConnection;
 	try {

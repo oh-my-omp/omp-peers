@@ -32,14 +32,45 @@ const boundedText = z
 	.min(1)
 	.refine((text) => utf8Bytes(text) <= MAX_TEXT_BYTES, { message: `longer than ${MAX_TEXT_BYTES} UTF-8 bytes` });
 
-/** The main session that sent a request, as it described itself when sending. */
-const senderSchema = z.object({
+/**
+ * Who sent a request, as it described itself when sending. A main session can be replied to with
+ * `peer_send`; a subagent is not a peer, so what it sends is one-way. On the wire a subagent adds
+ * its registry id as `subagent`; senders that predate it omit the field and are main sessions.
+ */
+const wireSenderSchema = z.object({
 	pid: z.number().int().positive(),
 	sessionId: z.string().min(1),
 	title: z.string().optional(),
 	cwd: z.string(),
+	subagent: z.string().min(1).optional(),
 });
-export type Sender = z.infer<typeof senderSchema>;
+type WireSender = z.infer<typeof wireSenderSchema>;
+const senderSchema = wireSenderSchema.transform(
+	({ subagent, ...origin }): Sender =>
+		subagent === undefined ? { kind: "main", ...origin } : { kind: "sub", agentId: subagent, ...origin },
+);
+
+interface Origin {
+	pid: number;
+	sessionId: string;
+	title?: string;
+	cwd: string;
+}
+export type Sender = ({ kind: "main" } & Origin) | ({ kind: "sub"; agentId: string } & Origin);
+
+/** The wire form of a sender, the inverse of `senderSchema`. */
+export function senderWire(sender: Sender): WireSender {
+	switch (sender.kind) {
+		case "main": {
+			const { kind: _kind, ...origin } = sender;
+			return origin;
+		}
+		case "sub": {
+			const { kind: _kind, agentId, ...origin } = sender;
+			return { ...origin, subagent: agentId };
+		}
+	}
+}
 
 const requestSchema = z.union([
 	z.object({ v: z.literal(PROTOCOL_VERSION), kind: z.literal("list") }),
@@ -47,6 +78,11 @@ const requestSchema = z.union([
 	z.object({ v: z.literal(PROTOCOL_VERSION), kind: z.literal("irc"), to: z.string().min(1), from: senderSchema, message: boundedText }),
 ]);
 export type Request = z.infer<typeof requestSchema>;
+/** A request as it goes on the wire, before the receiving endpoint parses it into `Request`. */
+export type WireRequest =
+	| Extract<Request, { kind: "list" }>
+	| (Omit<Extract<Request, { kind: "ask" }>, "from"> & { from: WireSender })
+	| (Omit<Extract<Request, { kind: "irc" }>, "from"> & { from: WireSender });
 
 /** One main session a node serves, read live when a list request arrives. */
 const sessionSchema = z.object({

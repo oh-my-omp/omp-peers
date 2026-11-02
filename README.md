@@ -14,7 +14,7 @@ The entry is the package-root `index.ts`, declared by `omp.extensions` in `packa
 
 ## Tools
 
-Main sessions and subagents can use all three tools. Only main sessions register as peers and can receive requests. Subagents identify themselves by their process and registry id: `peer_ask` returns the side answer through the call, but recipients must not use `peer_send` to reply to a subagent.
+Main sessions and subagents can use all three tools. They are top-level omp tools (`loadMode: "essential"`), not `xd://` devices; `read xd://<tool>/<topic>` still returns their topics. Only main sessions register as peers and can receive requests. Subagents identify themselves by their process and registry id: `peer_ask` returns the side answer through the call, but recipients must not use `peer_send` to reply to a subagent.
 
 | Tool | Effect on the target session |
 |---|---|

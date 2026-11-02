@@ -184,7 +184,7 @@ async function guarded(run: () => Promise<Result>): Promise<Result> {
 	}
 }
 
-/** The tool definitions; called once per extension binding, so labels follow the UI language of that session. */
+/** The tool definitions, all top-level (`loadMode: "essential"`) rather than `xd://` devices; called once per extension binding, so labels follow the UI language of that session. */
 export const peerTools = () =>
 	[
 		{
@@ -196,6 +196,7 @@ Available to main sessions and subagents; only main sessions register as peers.
 Topics — read the one a call needs before making it:
 - \`xd://peer_list/liveness\` — before relying on who is alive, or when a process shows no session list`,
 			parameters: listParams,
+			loadMode: "essential",
 			approval: "read",
 			docTopics: () => topicsFor("peer_list"),
 			execute: (_id, _params, _signal, _onUpdate, ctx) => guarded(() => list(ctx)),
@@ -209,6 +210,7 @@ Available to main sessions and subagents. A subagent's question is one-way: the 
 Topics — read the one a call needs before making it:
 - \`xd://peer_ask/side-turns\` — before asking, or when an ask fails or comes back cut`,
 			parameters: askParams,
+			loadMode: "essential",
 			approval: "read",
 			docTopics: () => topicsFor("peer_ask"),
 			execute: (_id, params, signal, _onUpdate, ctx) => guarded(() => ask(params, signal, ctx)),
@@ -222,6 +224,7 @@ Available to main sessions and subagents. Messages from subagents are one-way: r
 Topics — read the one a call needs before making it:
 - \`xd://peer_send/replies\` — before sending, and before replying to an incoming peer message`,
 			parameters: sendParams,
+			loadMode: "essential",
 			approval: "write",
 			docTopics: () => topicsFor("peer_send"),
 			execute: (_id, params, signal, _onUpdate, ctx) => guarded(() => send(params, signal, ctx)),

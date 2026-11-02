@@ -14,7 +14,7 @@ omp install https://github.com/oh-my-omp/omp-peers
 
 ## 工具
 
-主会话和子代理都可以使用三个工具。只有主会话注册为 peer 并接收请求。子代理通过所属进程和 registry id 标识发送方：`peer_ask` 的旁路回答通过调用返回，但接收方不得用 `peer_send` 回复子代理。
+主会话和子代理都可以使用三个工具。它们是 omp 的顶层工具（`loadMode: "essential"`），不是 `xd://` 设备；`read xd://<tool>/<topic>` 仍返回各自的 topic。只有主会话注册为 peer 并接收请求。子代理通过所属进程和 registry id 标识发送方：`peer_ask` 的旁路回答通过调用返回，但接收方不得用 `peer_send` 回复子代理。
 
 | 工具 | 对目标会话的影响 |
 |---|---|

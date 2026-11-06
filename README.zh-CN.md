@@ -24,7 +24,7 @@ omp install https://github.com/oh-my-omp/omp-peers
 
 用 session id 或其唯一前缀寻址会话。`/new` 和 resume 会更换 id，发给旧 id 的请求会以 `target_not_found` 失败。给模型看的详细规则写在 `src/topics/` 下的工具 topic 里。
 
-工具标签跟随界面语言：先看 `OMOMP_LANG`（`en` 或 `zh`），再看 agent 目录下唯一一份 `omomp.{yml,yaml,json,toml}` 的 `omomp-lang` 段，再看 `LC_ALL` / `LC_MESSAGES` / `LANG`，最后是英文。工具说明、topic 和结果是给模型读的，保持英文。
+工具标签跟随界面语言：先看 `OMOMP_LANG`（`en` 或 `zh`），再看 `LC_ALL` / `LC_MESSAGES` / `LANG`，最后是英文。工具说明、topic 和结果是给模型读的，保持英文。
 
 ## 工作方式
 

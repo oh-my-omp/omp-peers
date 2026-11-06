@@ -24,7 +24,7 @@ Main sessions and subagents can use all three tools. They are top-level omp tool
 
 Sessions are addressed by session id, or a unique prefix. The id changes on `/new` and resume; a request to an old id fails with `target_not_found`. Detailed model-facing rules are the tool topics in `src/topics/`.
 
-Tool labels follow the UI language: `OMOMP_LANG` (`en` or `zh`), then the `omomp-lang` section of the single `omomp.{yml,yaml,json,toml}` in the agent directory, then `LC_ALL` / `LC_MESSAGES` / `LANG`, then English. Descriptions, topics and results, which the model reads, stay English.
+Tool labels follow the UI language: `OMOMP_LANG` (`en` or `zh`), then `LC_ALL` / `LC_MESSAGES` / `LANG`, then English. Descriptions, topics and results, which the model reads, stay English.
 
 ## How it works
 

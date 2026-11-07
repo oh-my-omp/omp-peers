@@ -42,6 +42,7 @@ process.env.PI_CODING_AGENT_DIR = join(work, "agent");
 const { SessionManager } = await import("@oh-my-pi/pi-coding-agent/session/session-manager");
 const { formatSessionHistoryMarkdown } = await import("@oh-my-pi/pi-coding-agent/session/session-history-format");
 const { SecretObfuscator } = await import("@oh-my-pi/pi-coding-agent/secrets/obfuscator");
+const { builtinCredentialSecretEntries } = await import("@oh-my-pi/pi-coding-agent/secrets/index");
 const { advisorToolIOTransform } = await import("@oh-my-pi/pi-coding-agent/advisor/delta-split");
 const { buildIrcMessageCard } = await import("@oh-my-pi/pi-tui/chat/transcript-render-helpers");
 const { loadThemeSync } = await import("@oh-my-pi/pi-tui/theme/loader");
@@ -66,9 +67,15 @@ setThemeInstance(loadThemeSync("dark"));
 
 const ROUNDS = 5;
 const CARD_WIDTH = 100;
+/** Columns of the folded message `details.message` keeps after the change (`SUMMARY_COLUMNS` in src/local-main.ts). */
+const SUMMARY_COLUMNS = 4096;
 const SECRET = "sk-bench-7f3a9c2e5b8d1f4a6c0e9b2d7a5f3c1e8b6d4a2f";
+// The advisor's redaction: a configured literal plus the host's built-in credential patterns.
 const transform = advisorToolIOTransform(
-	new SecretObfuscator([{ type: "plain", content: SECRET, mode: "replace", replacement: "[REDACTED]" }]),
+	new SecretObfuscator(
+		[{ type: "plain", content: SECRET, mode: "replace", replacement: "[REDACTED]" }, ...builtinCredentialSecretEntries()],
+		"deliver-bench-key",
+	),
 	new Set(),
 );
 const SENDER: Sender = { kind: "main", pid: 4242, sessionId: "bench-sender", title: "bench sender", cwd: "/tmp/bench" };
@@ -333,18 +340,24 @@ if (args.legacy !== undefined) {
 			const before = detailsMessage(base.entry.details);
 			const after = detailsMessage(now.entry.details);
 			const saved = base.entryBytes - now.entryBytes;
-			// Row 1: the entry shrinks by exactly the JSON bytes dropped from details.message.
+			// Row 1: the entry shrinks by exactly the JSON bytes dropped from details.message, which keeps at
+			// most SUMMARY_COLUMNS folded columns; a message within that keeps its folded text.
 			console.log(
-				`row1 ${now.name}: entryBytes ${base.entryBytes} -> ${now.entryBytes} (saved ${saved} of message ${now.messageBytes}); heapDeliver ${base.heapDeliver} -> ${now.heapDeliver}; heapReload ${base.heapReload} -> ${now.heapReload}`,
+				`row1 ${now.name}: entryBytes ${base.entryBytes} -> ${now.entryBytes} (saved ${saved} of message ${now.messageBytes}; details.message ${before.length} -> ${after.length} chars); heapDeliver ${base.heapDeliver} -> ${now.heapDeliver}; heapReload ${base.heapReload} -> ${now.heapReload}`,
 			);
 			check(
 				Buffer.byteLength(JSON.stringify(before)) - Buffer.byteLength(JSON.stringify(after)) === saved,
 				`row1 ${now.name}: saved bytes equal the bytes dropped from details.message`,
 			);
+			check(after.length <= SUMMARY_COLUMNS + 2, `row1 ${now.name}: details.message keeps at most ${SUMMARY_COLUMNS} columns`);
 			if (now.name === "short") {
 				check(before === after && saved === 0, "row1 short: a one-line message is its own summary, nothing to save");
-			} else {
-				check(saved >= now.messageBytes * 0.9, `row1 ${now.name}: saved at least 90% of one message copy`);
+			}
+			if (now.messageChars > 2 * SUMMARY_COLUMNS) {
+				check(
+					saved >= (now.messageBytes - Buffer.byteLength(after)) * 0.95,
+					`row1 ${now.name}: saved one message copy less the kept prefix`,
+				);
 				check(now.heapDeliver < base.heapDeliver, `row1 ${now.name}: heap retained by one deliver is lower`);
 				check(now.heapReload < base.heapReload, `row1 ${now.name}: heap retained by reopening the session is lower`);
 			}

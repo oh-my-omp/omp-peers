@@ -17,14 +17,29 @@ export function utf8Bytes(text: string): number {
 	return utf8.encode(text).byteLength;
 }
 
+/** UTF-8-capable decoder shared by the truncation path; default options, so a
+ * leading BOM is eaten and lone surrogates decode to U+FFFD exactly as an
+ * encode+decode round trip does. */
+const utf8Decode = new TextDecoder();
+
 /** `text` cut to at most `maxBytes` UTF-8 bytes on a character boundary. */
 export function truncateUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
-	const bytes = utf8.encode(text);
-	if (bytes.byteLength <= maxBytes) return { text, truncated: false };
+	if (text.length * 3 <= maxBytes) return { text, truncated: false };
+	// Buffer of maxBytes+3: a code point that starts at or before maxBytes-1
+	// and is at most 4 bytes wide always fits in it. encodeInto stops before
+	// any code point that does not fit into the buffer.
+	const buf = new Uint8Array(Math.min(maxBytes + 3, text.length * 3));
+	const { written, read } = utf8.encodeInto(text, buf);
+	if (written <= maxBytes) {
+		// encodeInto either consumed the whole string or stopped on a code point
+		// boundary, so `written` is a cut-safe byte count.
+		if (read === text.length) return { text, truncated: false };
+		return { text: utf8Decode.decode(buf.subarray(0, written)), truncated: true };
+	}
 	let end = maxBytes;
 	// Back up over continuation bytes (10xxxxxx) so the cut never splits a character.
-	while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
-	return { text: new TextDecoder().decode(bytes.subarray(0, end)), truncated: true };
+	while (end > 0 && ((buf[end] ?? 0) & 0xc0) === 0x80) end--;
+	return { text: utf8Decode.decode(buf.subarray(0, end)), truncated: true };
 }
 
 const boundedText = z

@@ -204,4 +204,39 @@ describe("truncateUtf8", () => {
 		expect(truncateUtf8("éé", 3)).toEqual({ text: "é", truncated: true });
 		expect(truncateUtf8("éé", 4)).toEqual({ text: "éé", truncated: false });
 	});
+
+	test("a cut landing inside a character decodes to the replacement char, like the whole-string cut did", () => {
+		// "é" is two UTF-8 bytes: a 1-byte cap backs the cut up to 0 bytes and
+		// the remaining lead byte is discarded with the tail.
+		expect(truncateUtf8("é", 1)).toEqual({ text: "", truncated: true });
+		expect(truncateUtf8("é中", 2)).toEqual({ text: "é", truncated: true });
+	});
+
+	test("a four-byte character too wide for the cap truncates to the prefix before it", () => {
+		// "🜛" is four UTF-8 bytes; a 3-byte cap keeps nothing of it.
+		expect(truncateUtf8("a🜛", 4)).toEqual({ text: "a", truncated: true });
+		expect(truncateUtf8("🜛", 3)).toEqual({ text: "", truncated: true });
+	});
+
+	test("a character starting exactly at the cut is left to the tail, structurally", () => {
+		// "中" (three bytes) starting at byte offset 3 and 4: the cut lands where
+		// the next character begins, so the kept prefix ends on a boundary and
+		// contains no partial lead byte.
+		expect(truncateUtf8("a中", 4)).toEqual({ text: "a中", truncated: false });
+		expect(truncateUtf8("中a中", 6)).toEqual({ text: "中a", truncated: true });
+	});
+
+	test("a lone surrogate and a leading BOM behave like an encode round trip", () => {
+		// A lone surrogate encodes to three replacement bytes (0xEF 0xBF 0xBD);
+		// with caps 4 and 5 the whole encoding fits, so nothing is cut — but the
+		// short path still returns the original string, not the encoded form.
+		expect(truncateUtf8("\uD800", 4)).toEqual({ text: "\uD800", truncated: false });
+		expect(truncateUtf8("\uD800", 5)).toEqual({ text: "\uD800", truncated: false });
+		// A leading U+FEFF is eaten on the way through the encoder, both whole
+		// and when the cut lands inside the eaten three bytes: the decode of the
+		// kept part may be empty where the model-visible byte count still grew.
+		expect(truncateUtf8("\uFEFFx", 3)).toEqual({ text: "", truncated: true });
+		expect(truncateUtf8("\uFEFFx", 2)).toEqual({ text: "", truncated: true });
+		expect(truncateUtf8("\uFEFFx", 1)).toEqual({ text: "", truncated: true });
+	});
 });

@@ -46,8 +46,9 @@ function ircContent(message: string, from: Sender): string {
  * Columns of the whitespace-folded message that `details.message` keeps. The host previews it with
  * `previewLine`, which folds whitespace and cuts at column 119, redacting secrets first when it
  * renders for the advisor; a redacted preview equals the full message's as long as every secret
- * starting before the cut ends inside the kept prefix. 4096 columns hold an RSA-4096 PEM private key
- * (a built-in secret pattern that spans whitespace) or a typical JWT.
+ * starting before the cut, with any context its pattern needs, ends inside the kept prefix. 4096
+ * columns hold an RSA-4096 PEM private key (a built-in secret pattern that spans whitespace) or a
+ * typical JWT.
  */
 const SUMMARY_COLUMNS = 4096;
 

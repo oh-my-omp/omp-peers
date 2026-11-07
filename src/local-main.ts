@@ -44,16 +44,13 @@ function ircContent(message: string, from: Sender): string {
 
 /** Width of the host's one-line previews (`previewLine`): they fold whitespace and cut at column 119. */
 const SUMMARY_COLUMNS = 120;
-/** Longest prefix of the folded message a summary keeps: the word crossing the cut stays whole up to here. */
-const SUMMARY_KEEP = SUMMARY_COLUMNS - 1 + 512;
 
 /**
  * The one-line summary the IRC card and the session summary line render from `details.message`,
  * so the entry holds the full message once, in `content`. It is the whitespace-folded message up to
- * the end of the word that crosses column 119 (at most `SUMMARY_KEEP` columns), followed by ` …`
- * when more follows. A summary longer than the cut previews exactly as the full message does, and
- * a redacting preview still sees a secret crossing the cut whole rather than a fragment.
- * Only the words it keeps are read, so the work and the result stay bounded for any message length.
+ * the end of the word that crosses column 119, followed by ` …` when more follows. A summary longer
+ * than the cut previews exactly as the full message does, and a redacting preview still sees a
+ * whitespace-free secret crossing the cut whole rather than a fragment. Only the kept words are read.
  */
 function ircSummary(message: string): string {
 	const words = /\S+/g;
@@ -64,10 +61,8 @@ function ircSummary(message: string): string {
 		const start = kept.length === 0 ? 0 : length + 1;
 		// The previous word ended at or past the cut and more follows.
 		if (start >= SUMMARY_COLUMNS) return [...kept, "…"].join(" ");
-		const word = match[0];
-		if (start + word.length > SUMMARY_KEEP) return [...kept, word.slice(0, SUMMARY_KEEP - start), "…"].join(" ");
-		kept.push(word);
-		length = start + word.length;
+		kept.push(match[0]);
+		length = start + match[0].length;
 	}
 	return kept.join(" ");
 }

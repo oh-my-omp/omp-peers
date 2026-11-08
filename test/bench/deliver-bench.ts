@@ -67,8 +67,6 @@ setThemeInstance(loadThemeSync("dark"));
 
 const ROUNDS = 5;
 const CARD_WIDTH = 100;
-/** Columns of the folded message `details.message` keeps after the change (`SUMMARY_COLUMNS` in src/local-main.ts). */
-const SUMMARY_COLUMNS = 4096;
 const SECRET = "sk-bench-7f3a9c2e5b8d1f4a6c0e9b2d7a5f3c1e8b6d4a2f";
 // The advisor's redaction: a configured literal plus the host's built-in credential patterns.
 const transform = advisorToolIOTransform(
@@ -131,7 +129,6 @@ const TIERS: Tier[] = [
 type EntryFields = { customType: unknown; content: unknown; display: unknown; details: unknown; attribution: unknown };
 type TierRecord = {
 	name: string;
-	messageChars: number;
 	messageBytes: number;
 	entryBytes: number;
 	heapDeliver: number;
@@ -238,7 +235,6 @@ async function measure(tier: Tier): Promise<TierRecord> {
 	if (tier.name === "large-64k" && args["keep-session"] !== undefined) copyFileSync(file, args["keep-session"]);
 	return {
 		name: tier.name,
-		messageChars: text.length,
 		messageBytes: Buffer.byteLength(text),
 		entryBytes: Buffer.byteLength(line) + 1,
 		heapDeliver: median(deliverHeap),
@@ -284,7 +280,9 @@ if (args.legacy !== undefined) {
 	console.log(`legacy summary: ${oldRender.summaryPlain}`);
 	console.log(`legacy card (expanded, ${oldRender.cardExpanded.length} rows):\n${oldRender.cardExpanded.join("\n")}`);
 	check(
-		typeof old.content === "string" && legacyText.length > 0 && old.content.includes(legacyText),
+		// `details.message` is the folded text — a bounded prefix in a legacy entry, the whole message in a
+		// new one — so the content must carry it once whitespace is folded the same way.
+		typeof old.content === "string" && legacyText.length > 0 && old.content.replace(/\s+/g, " ").includes(legacyText.replace(/ …$/, "")),
 		"legacy entry: full message still present in the model-visible content",
 	);
 	if (args.compare !== undefined) {
@@ -339,47 +337,31 @@ if (args.legacy !== undefined) {
 			}
 			const before = detailsMessage(base.entry.details);
 			const after = detailsMessage(now.entry.details);
-			const saved = base.entryBytes - now.entryBytes;
-			// Row 1: the entry shrinks by exactly the JSON bytes dropped from details.message, which keeps at
-			// most SUMMARY_COLUMNS folded columns; a message within that keeps its folded text.
+			const text = TIERS.find((t) => t.name === now.name)?.make() ?? "";
+			// The entry holds the message twice — the original in `content`, its folded form in
+			// `details.message` — so against a baseline written while `details.message` was a bounded
+			// prefix the entry grows. Bytes and heap stay measurements, not thresholds.
 			console.log(
-				`row1 ${now.name}: entryBytes ${base.entryBytes} -> ${now.entryBytes} (saved ${saved} of message ${now.messageBytes}; details.message ${before.length} -> ${after.length} chars); heapDeliver ${base.heapDeliver} -> ${now.heapDeliver}; heapReload ${base.heapReload} -> ${now.heapReload}`,
+				`bytes ${now.name}: entryBytes ${base.entryBytes} -> ${now.entryBytes} (message ${now.messageBytes}); details.message ${before.length} -> ${after.length} chars; heapDeliver ${base.heapDeliver} -> ${now.heapDeliver}; heapReload ${base.heapReload} -> ${now.heapReload}`,
 			);
-			check(
-				Buffer.byteLength(JSON.stringify(before)) - Buffer.byteLength(JSON.stringify(after)) === saved,
-				`row1 ${now.name}: saved bytes equal the bytes dropped from details.message`,
-			);
-			check(after.length <= SUMMARY_COLUMNS + 2, `row1 ${now.name}: details.message keeps at most ${SUMMARY_COLUMNS} columns`);
-			if (now.name === "short") {
-				check(before === after && saved === 0, "row1 short: a one-line message is its own summary, nothing to save");
-			}
-			if (now.messageChars > 2 * SUMMARY_COLUMNS) {
-				check(
-					saved >= (now.messageBytes - Buffer.byteLength(after)) * 0.95,
-					`row1 ${now.name}: saved one message copy less the kept prefix`,
-				);
-				check(now.heapDeliver < base.heapDeliver, `row1 ${now.name}: heap retained by one deliver is lower`);
-				check(now.heapReload < base.heapReload, `row1 ${now.name}: heap retained by reopening the session is lower`);
-			}
-			// Row 2: model-visible content is identical.
-			check(now.entry.content === base.entry.content, `row2 ${now.name}: content identical (${String(now.entry.content).length} chars)`);
-			// Row 3: summary lines identical (plain and redacted); card title identical, body one line.
-			console.log(`row3 ${now.name} summary: ${now.summaryPlain}`);
-			console.log(`row3 ${now.name} summary (redacted): ${now.summaryRedacted}`);
-			check(now.summaryPlain === base.summaryPlain, `row3 ${now.name}: summary line identical`);
-			check(now.summaryRedacted === base.summaryRedacted, `row3 ${now.name}: redacted summary line identical`);
-			check(!now.summaryRedacted.includes(SECRET.slice(0, 12)), `row3 ${now.name}: redacted summary shows no secret fragment`);
-			check(now.cardCollapsed[0] === base.cardCollapsed[0], `row3 ${now.name}: card title row identical`);
-			const bodyLines = after.split("\n").length;
-			check(bodyLines === 1, `row3 ${now.name}: card body source is one line`);
-			console.log(`row3 ${now.name} card before (collapsed, ${base.cardCollapsed.length} rows):\n${base.cardCollapsed.join("\n")}`);
-			console.log(`row3 ${now.name} card after (collapsed, ${now.cardCollapsed.length} rows):\n${now.cardCollapsed.join("\n")}`);
-			// Row 4: field-by-field diff of the persisted entry.
+			check(after === text.replace(/\s+/g, " ").trim(), `${now.name}: details.message is the folded full message`);
+			check(now.entry.content === base.entry.content, `content ${now.name}: content identical (${String(now.entry.content).length} chars)`);
+			console.log(`render ${now.name} summary: ${now.summaryPlain}`);
+			console.log(`render ${now.name} summary (redacted): ${now.summaryRedacted}`);
+			check(now.summaryPlain === base.summaryPlain, `render ${now.name}: summary line identical`);
+			check(now.summaryRedacted === base.summaryRedacted, `render ${now.name}: redacted summary line identical`);
+			check(!now.summaryRedacted.includes(SECRET.slice(0, 12)), `render ${now.name}: redacted summary shows no secret fragment`);
+			check(now.cardCollapsed[0] === base.cardCollapsed[0], `render ${now.name}: card title row identical`);
+			check(after.split("\n").length === 1, `render ${now.name}: card body source is one line`);
+			console.log(`render ${now.name} card before (collapsed, ${base.cardCollapsed.length} rows):\n${base.cardCollapsed.join("\n")}`);
+			console.log(`render ${now.name} card after (collapsed, ${now.cardCollapsed.length} rows):\n${now.cardCollapsed.join("\n")}`);
 			const paths = diffPaths(base.entry, now.entry);
-			console.log(`row4 ${now.name}: differing fields [${paths.join(", ")}]`);
+			console.log(`fields ${now.name}: differing fields [${paths.join(", ")}]`);
+			// A tier whose folded text fit the old prefix persists identically; otherwise only the second
+			// copy in `details.message` differs.
 			check(
-				now.name === "short" ? paths.length === 0 : paths.length === 1 && paths[0] === "details.message",
-				`row4 ${now.name}: differences only in details.message`,
+				paths.every((p) => p === "details.message"),
+				`fields ${now.name}: differences only in details.message`,
 			);
 		}
 	}

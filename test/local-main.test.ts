@@ -22,6 +22,12 @@ const PEM = [
 	...Array.from({ length: 50 }, (_, i) => `MIIJQwIBADANBgkqhkiG9w0BAQEFAASCCS0wggkpAgEAAoICAQ${String(i).padStart(14, "0")}`),
 	"-----END PRIVATE KEY-----",
 ].join("\n");
+// Credentials long enough to cross column 4096 of the folded message: a redaction that only saw a
+// prefix cut there could not reach their end and would leave the beginning readable.
+const LONG_PEM = ["-----BEGIN PRIVATE KEY-----", ...Array.from({ length: 110 }, () => "QUJD".repeat(16)), "-----END PRIVATE KEY-----"].join(
+	"\n",
+);
+const LONG_JWT = `eyJhbGciOiJIUzI1NiJ9.eyJ${"U0VDUkVU".repeat(600)}.${"c2ln".repeat(10)}`;
 const transform = advisorToolIOTransform(
 	new SecretObfuscator(
 		[
@@ -67,6 +73,8 @@ const SECRET_CASES: Record<string, { message: string; secret: string }> = {
 	"secret needing right-hand context at the cut": { message: `${pad(117)} S3CR3T TAIL more`, secret: "S3CR3T" },
 	"JWT across the cut": { message: `${pad(100)} ${JWT} tail`, secret: JWT },
 	"PEM private key across the cut": { message: `${pad(100)} ${PEM}\ntail ${pad(5000)}`, secret: PEM },
+	"PEM private key beyond 4096 columns": { message: `please use this key ${LONG_PEM} thanks`, secret: LONG_PEM },
+	"JWT beyond 4096 columns": { message: `token ${LONG_JWT} end`, secret: LONG_JWT },
 };
 const CASES: Record<string, string> = {
 	"one line": "hello there",
@@ -75,36 +83,34 @@ const CASES: Record<string, string> = {
 	"folded whitespace": `${pad(60)}\n\n\t  ${pad(70)}\n${pad(10)}`,
 	"space at the cut": `${pad(119)} ${pad(40)} tail`,
 	"surrogate pair at the cut": `${pad(118)}🜛${pad(50)} tail`,
-	"exactly 4096 columns": pad(4096),
-	"word across the kept prefix": `${pad(4000)} ${pad(200)} tail`,
+	"surrogate pair at column 4096": `${pad(4095)}🜛 tail`,
 	"single 64 KiB token": pad(64 * 1024),
+	"empty message": "",
+	"whitespace only": " \n\t\r\f\v ",
+	"non-breaking space": `a\u00a0b${"\u00a0".repeat(3)}c`,
+	"byte order mark": `a\ufeffb\ufeff\ufeffc`,
+	"line and paragraph separators": `a\u2028b\u2029c`,
 	"multi-line large": Array.from({ length: 2000 }, (_, i) => `line ${i} ${pad(i % 80)}`).join("\n"),
 	...Object.fromEntries(Object.entries(SECRET_CASES).map(([name, c]) => [name, c.message])),
 };
 
-describe("deliver keeps the full message once, in content", () => {
+describe("deliver keeps the full message in content and its folded form in details.message", () => {
 	for (const [name, message] of Object.entries(CASES)) {
 		test(name, () => {
 			const sent = deliver(message);
 			expect(sent.customType).toBe("irc:incoming");
 			expect(sent.content).toContain(message);
 			expect(sent.details.from).toBe("peer (pid 7)");
+			// Folded, whole and well formed: the host redacts the full text before it previews the entry,
+			// so a cut here would leave a credential fragment it can no longer recognize.
+			expect(sent.details.message).toBe(message.replace(/\s+/g, " ").trim());
 			expect(sent.details.message).not.toContain("\n");
-			expect(sent.details.message.length).toBeLessThanOrEqual(4096 + 2);
+			expect(sent.details.message.endsWith(" …")).toBe(false);
+			expect(sent.details.message.isWellFormed()).toBe(true);
 			expect(summaryLine(sent.details.message, false)).toBe(summaryLine(message, false));
 			expect(summaryLine(sent.details.message, true)).toBe(summaryLine(message, true));
 		});
 	}
-
-	test("a long message keeps a bounded prefix as its second copy", () => {
-		for (const name of ["single 64 KiB token", "multi-line large"]) {
-			const message = CASES[name] ?? "";
-			const summary = deliver(message).details.message;
-			expect(summary.endsWith(" …")).toBe(true);
-			expect(summary.length).toBeLessThanOrEqual(4096 + 2);
-			expect(summary.length).toBeLessThan(message.length / 10);
-		}
-	});
 
 	test("a secret crossing the summary line's cut stays redacted there", () => {
 		for (const { message, secret } of Object.values(SECRET_CASES)) {

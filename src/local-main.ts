@@ -42,38 +42,6 @@ function ircContent(message: string, from: Sender): string {
 	].join("\n");
 }
 
-/**
- * Columns of the whitespace-folded message that `details.message` keeps. The host previews it with
- * `previewLine`, which folds whitespace and cuts at column 119, redacting secrets first when it
- * renders for the advisor; a redacted preview equals the full message's as long as every secret
- * starting before the cut, with any context its pattern needs, ends inside the kept prefix. 4096
- * columns hold an RSA-4096 PEM private key (a built-in secret pattern that spans whitespace) or a
- * typical JWT.
- */
-const SUMMARY_COLUMNS = 4096;
-
-/**
- * The one-line summary the IRC card and the session summary line render from `details.message`:
- * the whitespace-folded message, cut after `SUMMARY_COLUMNS` columns and then followed by ` …`.
- * The full text stays in `content`, so a long message is no longer held twice. Only the kept
- * words are read.
- */
-function ircSummary(message: string): string {
-	const words = /\S+/g;
-	const kept: string[] = [];
-	/** Folded length of `kept` joined by single spaces. */
-	let length = 0;
-	for (let match = words.exec(message); match !== null; match = words.exec(message)) {
-		const start = kept.length === 0 ? 0 : length + 1;
-		if (start >= SUMMARY_COLUMNS) return `${kept.join(" ")} …`;
-		const word = match[0];
-		if (start + word.length > SUMMARY_COLUMNS) return `${[...kept, word.slice(0, SUMMARY_COLUMNS - start)].join(" ")} …`;
-		kept.push(word);
-		length = start + word.length;
-	}
-	return kept.join(" ");
-}
-
 export function localMain(pi: ExtensionAPI, ctx: ExtensionContext): LocalMain {
 	/** The side question being answered; one at a time, held until the side turn settles. */
 	let answering: AbortController | undefined;
@@ -111,13 +79,15 @@ export function localMain(pi: ExtensionAPI, ctx: ExtensionContext): LocalMain {
 				content: ircContent(message, from),
 				display: true,
 				// The host's IRC card and session summary line render `from` and `message`; the model reads
-				// `content`, the entry's only full copy of the message.
+				// `content`, which keeps the original text. `message` is that text folded onto one line and
+				// left whole: the host redacts secrets on the full text before it previews the entry, and a
+				// cut made here would leave a fragment no later pass can recognize.
 				details: {
 					from:
 						from.kind === "sub"
 							? `subagent ${from.agentId} — ${from.title ?? from.sessionId} (pid ${from.pid})`
 							: `${from.title ?? from.sessionId} (pid ${from.pid})`,
-					message: ircSummary(message),
+					message: message.replace(/\s+/g, " ").trim(),
 				},
 			},
 			// aside: idle starts a turn; streaming reads it at the next step without breaking the tool batch.

@@ -1,6 +1,6 @@
 {
 	"name": "omp-peers",
-	"version": "0.1.9",
+	"version": "0.1.10",
 	"description": "Lets the omp main agents of one user find each other, ask /btw-style side questions and exchange IRC messages across processes",
 	"type": "module",
 	"repository": {

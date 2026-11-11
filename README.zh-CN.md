@@ -7,10 +7,16 @@
 ## 安装
 
 ```sh
-omp install https://github.com/oh-my-omp/omp-peers
+omp install https://github.com/oh-my-omp/omp-peers#release
 ```
 
 入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。插件没有配置项。
+
+## 发布
+
+`main` 是集成分支。PR 合并后仓库里的版本号不变；PR 用 [lgit](https://github.com/can1357/llm-git) 在 [`CHANGELOG.md`](CHANGELOG.md) 的 `## [Unreleased]` 下写条目：暂存改动后运行 `uvx --from lgit-cli lgit`。
+
+每天 02:00 GMT+9（cron `0 17 * * *`）以及手动触发时，共享 workflow `oh-my-omp/.github/.github/workflows/omomp-release.yml` 发布 `## [Unreleased]`：升版本号，在 `main` 上提交 `chore: release <version>`，打 `v<version>` tag，把 `release` 分支快进到该提交并创建 GitHub Release。安装跟随 `#release`，因此下次更新时拿到新版本。
 
 ## 工具
 

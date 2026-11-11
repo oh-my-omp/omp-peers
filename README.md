@@ -7,10 +7,16 @@ Lets the omp main sessions and subagents of one OS user discover main sessions a
 ## Install
 
 ```sh
-omp install https://github.com/oh-my-omp/omp-peers
+omp install https://github.com/oh-my-omp/omp-peers#release
 ```
 
 The entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`. The plugin has no settings.
+
+## Releases
+
+`main` is the integration branch. Merging a pull request does not change the version in the tree; the pull request writes its entry under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) with [lgit](https://github.com/can1357/llm-git) (stage the changes, then run `uvx --from lgit-cli lgit`).
+
+Every day at 02:00 GMT+9 (the schedule `0 17 * * *`), and on a manual dispatch, the shared workflow `oh-my-omp/.github/.github/workflows/omomp-release.yml` publishes `## [Unreleased]`: it bumps the version, commits `chore: release <version>` on `main`, tags `v<version>`, fast-forwards the `release` branch to that commit and creates the GitHub Release. `#release` follows this branch, so installations pick the new version up on their next update.
 
 ## Tools
 

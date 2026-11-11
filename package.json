@@ -9,8 +9,12 @@
 	},
 	"files": [
 		"index.ts",
-		"src"
+		"src",
+		"CHANGELOG.md"
 	],
+	"omomp": {
+		"changelog": "CHANGELOG.md"
+	},
 	"omp": {
 		"extensions": [
 			"./index.ts"

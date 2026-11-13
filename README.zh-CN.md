@@ -34,8 +34,10 @@ omp install https://github.com/oh-my-omp/omp-peers#release
 
 ## 工作方式
 
-- 只要还有一个主会话，omp 进程就在 `/tmp/omp-<uid>/peers/<pid>.sock` 上监听。这个目录按用户划分、不分 profile，同一用户的所有 profile 共用；`/tmp` 开机即清空，而端点本来就不需要活过本次开机。`/tmp/omp-<uid>` 必须属于当前用户且权限为 `0700`，否则不建端点，并在 omp 日志里告警；socket 权限为 `0600`，只接受同一用户的连接。
-- 连接能被接受，进程就算存活。没有心跳、注册中心或缓存，每次工具调用都现场读取当时的 peer。
+- 只要还有一个主会话，omp 进程就在一个按用户划分的端点上监听，同一用户的所有 profile 共用：
+  - macOS 与 Linux：socket `/tmp/omp-<uid>/peers/<pid>.sock`。`/tmp` 开机即清空，而端点本来就不需要活过本次开机。`/tmp/omp-<uid>` 必须属于当前用户且权限为 `0700`，否则不建端点，并在 omp 日志里告警；socket 权限为 `0600`，只接受同一用户的连接。
+  - Windows：命名管道 `\\.\pipe\omp-<pid>-<hash>`，同一用户的所有进程用同一个 hash。
+- 端点能接受连接，进程就算存活。没有心跳、注册中心或缓存，每次工具调用都现场读取当时的 peer。
 - 一个连接只承载一行 JSON 请求（`list`、`ask`、`irc`）和一行 JSON 响应。
 - 每个目标会话同一时间只回答一个旁路询问，第二个会得到 `ask_busy`。问题和消息上限 64 KiB，回答上限 32 KiB，被截断的回答会注明。
 - `peer_send` 在消息注入后就返回。没有已读回执，不跟踪回复，也不做离线投递。
@@ -43,11 +45,11 @@ omp install https://github.com/oh-my-omp/omp-peers#release
 
 ## 退出与残留
 
-进程的最后一个主会话关闭时，socket 被删除。omp 在 TUI 模式下，`/quit`、连按两次 Ctrl+C，以及 `kill` 发送 TERM、HUP 或 INT 都属于这种情况。`kill -9`，以及向 RPC 模式的 omp 发送的信号，都会跳过 shutdown 钩子，留下 socket 文件。这个文件会拒绝连接，所以永远不会被列为存活；它留到下次开机清空 `/tmp`，或被复用该 pid 的进程接管。
+进程的最后一个主会话关闭时，端点被关闭。omp 在 TUI 模式下，`/quit`、连按两次 Ctrl+C，以及 `kill` 发送 TERM、HUP 或 INT 都属于这种情况。`kill -9`，以及向 RPC 模式的 omp 发送的信号，都会跳过 shutdown 钩子。在 macOS 与 Linux 上会留下 socket 文件；这个文件会拒绝连接，所以永远不会被列为存活，它留到下次开机清空 `/tmp`，或被复用该 pid 的进程接管。Windows 的管道随进程结束。
 
 ## 信任边界
 
-同一 OS 用户下的任何进程都能连上 socket：向会话发起旁路询问（回答会用到该会话的上下文），也能往会话里注入消息。只在能接受这一点的机器上安装本插件。
+同一 OS 用户下的任何进程都能连上端点：向会话发起旁路询问（回答会用到该会话的上下文），也能往会话里注入消息。只在能接受这一点的机器上安装本插件。
 
 ## 开发
 

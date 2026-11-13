@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Windows support: processes listen on per-user named pipes and peer discovery finds live peers from the pipe namespace
+
 ## [0.1.10] - 2026-11-12
 
 ### Changed

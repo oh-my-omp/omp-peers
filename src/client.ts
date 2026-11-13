@@ -1,6 +1,7 @@
 // The asking side: dial a peer endpoint, send one request, read one response. A peer is alive
 // exactly when its endpoint accepts the connection; everything after that is a request result.
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { IpcConnection } from "@oh-my-pi/pi-natives";
 import { errorText } from "./errors.ts";
 import { endpointFor } from "./node.ts";
@@ -56,8 +57,13 @@ export async function exchange(dir: string, pid: number, request: WireRequest, t
 	return await promise;
 }
 
-/** Pids with an endpoint file. A file is only a lead: a crashed peer leaves one behind until reboot or pid reuse. */
+/**
+ * Pids with an endpoint in `dir`: on POSIX its `<pid>.sock` files, on Windows its named pipes. A file is
+ * only a lead: a crashed peer leaves one behind until reboot or pid reuse. A pipe exists only while its
+ * server listens.
+ */
 async function endpointPids(dir: string): Promise<number[]> {
+	if (process.platform === "win32") return pipePids(dir);
 	let names: string[];
 	try {
 		names = await fs.readdir(dir);
@@ -70,6 +76,20 @@ async function endpointPids(dir: string): Promise<number[]> {
 	for (const name of names) {
 		const match = /^(\d+)\.sock$/.exec(name);
 		if (match?.[1] !== undefined) pids.push(Number(match[1]));
+	}
+	return pids;
+}
+
+/**
+ * Windows: `ipcEndpoint(dir, pid)` is `\\.\pipe\omp-<pid>-<hash16 of dir>`, so the pipes of `dir` are the
+ * entries of the pipe namespace that end in the hash `dir` gives any name.
+ */
+async function pipePids(dir: string): Promise<number[]> {
+	const scope = path.win32.basename(endpointFor(dir, 0)).slice("omp-0".length).toLowerCase();
+	const pids: number[] = [];
+	for (const name of await fs.readdir("\\\\.\\pipe\\")) {
+		const match = /^omp-(\d+)(-[0-9a-f]{16})$/i.exec(name);
+		if (match?.[1] !== undefined && match[2]?.toLowerCase() === scope) pids.push(Number(match[1]));
 	}
 	return pids;
 }

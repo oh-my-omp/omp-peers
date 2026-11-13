@@ -98,7 +98,8 @@ describe("node lifecycle", () => {
 		expect(await survey(DIR)).toEqual([]);
 	});
 
-	test("a parent directory other users can enter is refused and no endpoint opens", async () => {
+	// Ownership and mode bits are checked on POSIX only; Windows endpoints are named pipes outside the file system.
+	test.skipIf(process.platform === "win32")("a parent directory other users can enter is refused and no endpoint opens", async () => {
 		const open = mkdtempSync(join(tmpdir(), "omp-peers-open-"));
 		chmodSync(open, 0o755);
 		const dir = join(open, "peers");

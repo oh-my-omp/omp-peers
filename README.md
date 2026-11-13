@@ -34,8 +34,10 @@ Tool labels follow the UI language: `OMOMP_LANG` (`en` or `zh`), then `LC_ALL` /
 
 ## How it works
 
-- Each omp process with at least one main session listens on `/tmp/omp-<uid>/peers/<pid>.sock`. The directory is per user and profile-independent, so every profile of the user shares it, and `/tmp` is emptied at boot, which no endpoint needs to outlive. `/tmp/omp-<uid>` must be owned by the user with mode `0700`, otherwise no endpoint is opened and omp logs a warning; the socket is `0600` and accepts the same user only.
-- A process is alive when its socket accepts a connection. There is no heartbeat, registry or cache: every tool call reads the peers at that moment.
+- Each omp process with at least one main session listens on one endpoint per user, shared by every profile of the user:
+  - macOS and Linux: the socket `/tmp/omp-<uid>/peers/<pid>.sock`. `/tmp` is emptied at boot, which no endpoint needs to outlive. `/tmp/omp-<uid>` must be owned by the user with mode `0700`, otherwise no endpoint is opened and omp logs a warning; the socket is `0600` and accepts the same user only.
+  - Windows: the named pipe `\\.\pipe\omp-<pid>-<hash>`, whose hash is the same for every process of the user.
+- A process is alive when its endpoint accepts a connection. There is no heartbeat, registry or cache: every tool call reads the peers at that moment.
 - One connection carries one JSON request line (`list`, `ask`, `irc`) and one JSON response line.
 - One side question per target session at a time; a second gets `ask_busy`. Questions and messages are capped at 64 KiB, answers at 32 KiB (cut answers are marked).
 - `peer_send` returns once the message is injected. There is no read receipt, no reply tracking and no offline delivery.
@@ -43,11 +45,11 @@ Tool labels follow the UI language: `OMOMP_LANG` (`en` or `zh`), then `LC_ALL` /
 
 ## Exit and leftovers
 
-The socket is removed when the last main session of the process shuts down. With omp in TUI mode that covers `/quit`, a double Ctrl+C and `kill` with TERM, HUP or INT. `kill -9`, and signals to omp in RPC mode, skip the shutdown hook and leave the socket file behind. It refuses connections, so it is never listed as alive; it stays until reboot empties `/tmp`, or the next process with that pid takes the path over.
+The endpoint is closed when the last main session of the process shuts down. With omp in TUI mode that covers `/quit`, a double Ctrl+C and `kill` with TERM, HUP or INT. `kill -9`, and signals to omp in RPC mode, skip the shutdown hook. On macOS and Linux they leave the socket file behind; it refuses connections, so it is never listed as alive, and it stays until reboot empties `/tmp`, or the next process with that pid takes the path over. A Windows pipe ends with its process.
 
 ## Trust
 
-Any process of the same OS user can connect to the socket, ask a session side questions (which read that session's context) and inject messages into it. Install the plugin only where that is acceptable.
+Any process of the same OS user can connect to the endpoint, ask a session side questions (which read that session's context) and inject messages into it. Install the plugin only where that is acceptable.
 
 ## Development
 

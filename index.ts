@@ -2,15 +2,16 @@
  * omp-peers: main sessions and subagents of one user's omp processes discover main sessions,
  * ask /btw-style side questions and send IRC messages. Subagents communicate one-way only.
  *
- * Process node (src/node.ts): one IPC endpoint per omp process, `/tmp/omp-<uid>/peers/<pid>.sock`
- * (per user, profile-independent, emptied at boot), open while at least one main session of the process is registered.
+ * Process node (src/node.ts): one IPC endpoint per omp process, `/tmp/omp-<uid>/peers/<pid>.sock` on POSIX
+ * (per user, profile-independent, emptied at boot) and the named pipe `\\.\pipe\omp-<pid>-<hash>` on Windows,
+ * open while at least one main session of the process is registered.
  * A peer is alive when its endpoint accepts a connection; each connection carries one JSON
  * request (`list`, `ask`, `irc`) and one response (src/protocol.ts).
  *
  * Events: `session_start` registers a main session with the node (subagents are not peers);
  * `session_shutdown` unregisters it, and the last one out closes the endpoint. Session id,
  * title, cwd and idle state are read live, so `/new` and resume need no re-registration.
- * `kill -9` and omp's RPC-mode signal exits skip `session_shutdown`; the endpoint file left
+ * `kill -9` and omp's RPC-mode signal exits skip `session_shutdown`; on POSIX the endpoint file left
  * behind refuses connections and stays until reboot empties `/tmp`, or the next process with that pid takes it over.
  *
  * Tools (main sessions and subagents): `peer_list`, `peer_ask` (the target answers through the

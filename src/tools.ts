@@ -3,10 +3,10 @@
 // `peer_send`, so a subagent asks and sends one-way.
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { type ExtensionContext, type ToolDefinition, z } from "@oh-my-pi/pi-coding-agent";
+import { tr } from "../omomp-shared/i18n.ts";
 import { unbridgedOmpPids } from "./candidates.ts";
 import { ASK_TIMEOUT_MS, DELIVER_TIMEOUT_MS, type Exchange, exchange, resolveTarget, survey } from "./client.ts";
 import { errorText } from "./errors.ts";
-import { tr } from "./i18n.ts";
 import { peersDir } from "./node.ts";
 import { MAX_ANSWER_BYTES, MAX_TEXT_BYTES, PROTOCOL_VERSION, type Sender, type SessionInfo, senderWire } from "./protocol.ts";
 import { topicsFor } from "./topics.ts";

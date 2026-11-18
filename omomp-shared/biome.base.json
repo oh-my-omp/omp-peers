@@ -1,5 +1,5 @@
 {
-	"formatter": { "indentStyle": "tab", "lineWidth": 141 },
+	"formatter": { "indentStyle": "tab", "lineWidth": 140 },
 	"javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always", "trailingCommas": "all" } },
 	"linter": {
 		"rules": {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the shared copy of `biome.base.json` to oh-my-omp/shared@26c4e48.
+
 ## [0.2.0] - 2026-11-15
 
 ### Added

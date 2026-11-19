@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the shared copy of `i18n.ts` to oh-my-omp/shared@e054d56.
+
 ## [0.2.1] - 2026-11-19
 
 ### Changed

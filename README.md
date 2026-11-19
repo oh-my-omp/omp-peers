@@ -2,61 +2,23 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Lets the omp main sessions and subagents of one OS user discover main sessions across processes, ask /btw-style side questions, and send IRC messages. Only main sessions register as peers; subagent communication is one-way. omp's own Agent Hub (`agent://`, `wait`) only reaches agents inside one omp process; omp-peers connects the processes.
-
-## Install
-
-```sh
-omp install https://github.com/oh-my-omp/omp-peers#release
-```
-
-The entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`. The plugin has no settings.
-
-## Releases
-
-`main` is the integration branch. Merging a pull request does not change the version in the tree; the pull request writes its entry under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) with [lgit](https://github.com/can1357/llm-git) (stage the changes, then run `uvx --from lgit-cli lgit`).
-
-Every day at 02:00 GMT+9 (the schedule `0 17 * * *`), and on a manual dispatch, the shared workflow `oh-my-omp/.github/.github/workflows/omomp-release.yml` publishes `## [Unreleased]`: it bumps the version, commits `chore: release <version>` on `main`, tags `v<version>`, fast-forwards the `release` branch to that commit and creates the GitHub Release. `#release` follows this branch, so installations pick the new version up on their next update.
-
-## Tools
-
-Main sessions and subagents can use all three tools. They are top-level omp tools (`loadMode: "essential"`), not `xd://` devices; `read xd://<tool>/<topic>` still returns their topics. Only main sessions register as peers and can receive requests. Subagents identify themselves by their process and registry id: `peer_ask` returns the side answer through the call, but recipients must not use `peer_send` to reply to a subagent.
-
-| Tool | Effect on the target session |
-|---|---|
-| `peer_list` | None. Lists the live omp processes running omp-peers with their main sessions (id, title, cwd, idle or busy), and omp processes without omp-peers as candidates. |
-| `peer_ask` | Answers in a side turn through omp's /btw executor (`runEphemeralTurn`): its model, system prompt and conversation, including output it is producing. Nothing is added to its conversation, its main turn is not interrupted, and no tools run. It does cost the target's model usage. |
-| `peer_send` | Injects an IRC message into its conversation as an `irc:incoming` card, delivered as an aside: an idle session starts a turn, a busy one reads it at its next step without its running tools being interrupted. The receiver can reply to a main sender with `peer_send`; messages from subagents are explicitly marked one-way and must not be replied to. |
-
-Sessions are addressed by session id, or a unique prefix. The id changes on `/new` and resume; a request to an old id fails with `target_not_found`. Detailed model-facing rules are the tool topics in `src/topics/`.
-
-Tool labels follow the UI language: `OMOMP_LANG` (`en` or `zh`), then `LC_ALL` / `LC_MESSAGES` / `LANG`, then English. Descriptions, topics and results, which the model reads, stay English.
-
-## How it works
-
-- Each omp process with at least one main session listens on one endpoint per user, shared by every profile of the user:
-  - macOS and Linux: the socket `/tmp/omp-<uid>/peers/<pid>.sock`. `/tmp` is emptied at boot, which no endpoint needs to outlive. `/tmp/omp-<uid>` must be owned by the user with mode `0700`, otherwise no endpoint is opened and omp logs a warning; the socket is `0600` and accepts the same user only.
-  - Windows: the named pipe `\\.\pipe\omp-<pid>-<hash>`, whose hash is the same for every process of the user.
-- A process is alive when its endpoint accepts a connection. There is no heartbeat, registry or cache: every tool call reads the peers at that moment.
-- One connection carries one JSON request line (`list`, `ask`, `irc`) and one JSON response line.
-- One side question per target session at a time; a second gets `ask_busy`. Questions and messages are capped at 64 KiB, answers at 32 KiB (cut answers are marked).
-- `peer_send` returns once the message is injected. There is no read receipt, no reply tracking and no offline delivery.
-- omp processes without omp-peers come from omp's project presence records (`~/.omp/run/daemons/<scope>/clients/`) whose pid is still running. They are reported as candidates only: the records can outlive their process.
-
-## Exit and leftovers
-
-The endpoint is closed when the last main session of the process shuts down. With omp in TUI mode that covers `/quit`, a double Ctrl+C and `kill` with TERM, HUP or INT. `kill -9`, and signals to omp in RPC mode, skip the shutdown hook. On macOS and Linux they leave the socket file behind; it refuses connections, so it is never listed as alive, and it stays until reboot empties `/tmp`, or the next process with that pid takes the path over. A Windows pipe ends with its process.
-
-## Trust
-
-Any process of the same OS user can connect to the endpoint, ask a session side questions (which read that session's context) and inject messages into it. Install the plugin only where that is acceptable.
-
-## Development
-
-```sh
-bun install
-bun run check
-bun test
-```
-
-For local runs, load the entry directly: `omp -e ./index.ts`. Tests run their own node on a private temporary directory, so they do not join the real peer set.
+- **Peer endpoint (one per omp process)**
+  - Main-session registration — Does: registers each main session (not subagents) with the process's endpoint; session id, title, cwd and idle state are read live, so `/new` and resume need no re-registration. When: on `session_start` of a main session. Example: `node.add(localMain(pi, ctx), warn)` in `index.ts`.
+  - IPC endpoint — Does: opens one endpoint per process for the same OS user, shared by every profile; it is the only liveness signal (no heartbeat, registry or cache). When: opened with the first registered main session. Example: `/tmp/omp-<uid>/peers/<pid>.sock` on macOS/Linux (parent must be the user's, mode `0700`), `\\.\pipe\omp-<pid>-<hash>` on Windows.
+  - Wire protocol — Does: each connection carries one JSON request line (`list`, `ask`, `irc`) and one JSON response line; failures use fixed codes. When: on every peer tool call. Example: error codes `bad_request`, `unsupported_version`, `target_not_found`, `ask_busy`, `ask_unsupported`, `ask_failed`, `delivery_failed`.
+  - Unregistration and close — Does: removes the main session and closes the endpoint when the last main session leaves; `kill -9` and RPC-mode signals skip it and leave a socket file that refuses connections. When: on `session_shutdown`. Example: `/quit`, double Ctrl+C or `kill -TERM` close it.
+- **Discovery (`peer_list`)**
+  - `peer_list` tool — Does: lists the live omp processes running omp-peers with their main sessions (id, title, cwd, idle or busy). When: when a main session or subagent calls it (top-level tool, `loadMode: "essential"`, approval `read`). Example: `2 omp process(es) reachable through omp-peers, 3 main session(s):` followed by `  - <sessionId> "<title>" — <cwd> — idle`.
+  - Candidates without omp-peers — Does: reports omp processes whose project presence record's pid is still running, as candidates that cannot be asked or messaged. When: in every `peer_list` result. Example: `Other omp processes without omp-peers (candidates; cannot be asked or messaged): pid 4182.` read from `~/.omp/run/daemons/<scope>/clients/`.
+  - `xd://peer_list/liveness` — Does: explains who counts as alive, `alive, session list unavailable` (no list within 2 s), idle/busy, and that session ids change on `/new` and resume. When: when the model reads it before relying on liveness. Example: ``A session id changes on `/new` and on resume. List again …``.
+- **Side questions (`peer_ask`)**
+  - `peer_ask` tool — Does: asks another main session a /btw-style side question and returns its answer through the call. When: when a main session or subagent calls it (approval `read`); waits up to 5 minutes, cancelling aborts the target's side turn. Example: `peer_ask({ to: "01a1f4a1", question: "Which branch are you on?" })` → `Answer from session <id> (pid <pid>):`.
+  - Side turn on the target — Does: the target answers through the host's `runEphemeralTurn` with its own model, system prompt and conversation, adding nothing to its conversation and running no tools; one question per target at a time; answers over 32 KiB are cut. When: when an `ask` request reaches the target's endpoint. Example: prompt `Side question from another omp main agent (session …, pid …, cwd …):`, busy reply `ask_busy`, cut marker `[answer cut at 32 KiB]`.
+  - `xd://peer_ask/side-turns` — Does: explains side-turn cost, one-at-a-time limit, the 32 KiB cut and the error codes. When: when the model reads it before asking or after a failed ask. Example: `` `target_not_found`: the session id changed (`/new`, resume) or its omp exited; run `peer_list`. ``
+- **Messages (`peer_send`)**
+  - `peer_send` tool — Does: sends a message (at most 64 KiB) into another main session's conversation and returns once injected, with no read receipt or offline delivery. When: when a main session or subagent calls it (approval `write`). Example: `peer_send({ to: "01a1", message: "PR #12 is merged" })` → ``Delivered to session <id> (pid <pid>). … A reply arrives as an incoming peer message and wakes you; do not `wait` for it.``
+  - `irc:incoming` injection — Does: injects the message as an `irc:incoming` custom message delivered as an aside: an idle target starts a turn, a busy one reads it at its next step without interrupting its tools. When: when an `irc` request reaches the target. Example: `Incoming peer message from another omp main agent (session …): … call peer_send with to "<sessionId>"; the sender's reply wakes you when it arrives.`
+  - One-way subagent senders — Does: marks questions and messages from subagents as one-way, so recipients answer through the side turn only and never `peer_send` back. When: whenever the sender is a subagent. Example: `This is a one-way message from a subagent: do not use peer_send to reply.`
+  - `xd://peer_send/replies` — Does: explains delivery, replies, the 64 KiB cap and avoiding reply loops. When: when the model reads it before sending or replying. Example: `Do not answer a reply that needs no answer, so two sessions do not wake each other in a loop.`
+- **UI language**
+  - Tool labels — Does: shows tool labels in English or Chinese; descriptions, topics and results stay English. When: when the tools are registered for a session. Example: `peer_list` label `Peers` / `Peer 列表`, chosen by `OMOMP_LANG`, then `LC_ALL`/`LC_MESSAGES`/`LANG`.

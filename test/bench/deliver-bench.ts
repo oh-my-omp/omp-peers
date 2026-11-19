@@ -1,30 +1,3 @@
-// Bench + equivalence harness for the issue-7 deliver fix (child B of omp-peers#5).
-// Synthetic messages per tree-root §4: three tiers — short (one line), medium (~4 KiB) and near the
-// 64 KiB message cap — from a seeded deterministic generator with a controlled multi-byte ratio.
-// The medium and large tiers put a configured secret across the host's 120-column summary cut, so
-// the redaction path of the summary line is exercised too.
-//
-// Each tier goes through `localMain(pi, ctx).deliver` of the checkout under test. `pi.sendMessage`
-// is backed by a real host `SessionManager` the way the host persists a custom message
-// (`appendCustomMessageEntry(customType, content, display, details)`); the session file is then
-// closed, reopened from disk and replayed through the host's own renderers: the session summary
-// line (`formatSessionHistoryMarkdown`, plain and with the advisor redaction transform) and the
-// transcript card (pi-tui `buildIrcMessageCard`). All host state lives under a fresh /tmp directory.
-//
-// Usage:
-//   bun test/bench/deliver-bench.ts [--src <dir>] [--dump <out.json>] [--compare <baseline.json>]
-//                                   [--keep-session <out.jsonl>] [--legacy <session.jsonl>]
-//   --src           the `src/` directory whose local-main.ts is measured (default: this checkout)
-//   --dump          write this run's records for a cross-commit comparison
-//   --compare       compare this run's records with a baseline dump; prints byte, content, render
-//                   and field-diff lines and exits non-zero on any violation
-//   --keep-session  copy the large tier's session file here (a baseline-written session)
-//   --legacy        open a session file written by another checkout, render it, deliver one more
-//                   message with this checkout into the same file and reopen it
-//
-// Metrics per tier: persisted entry bytes (the JSONL line), heap growth retained per deliver once
-// the entries are written, and heap growth per entry of reopening the session (heapUsed after
-// Bun.gc(true) over a batch of deliveries, median of ROUNDS rounds).
 import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -60,7 +33,6 @@ const { values: args } = parseArgs({
 	},
 });
 const srcDir = resolve(args.src ?? join(import.meta.dir, "../../src"));
-// Runtime-selected: --src points at the checkout under test (baseline or change).
 const { localMain }: typeof LocalMainModule = await import(join(srcDir, "local-main.ts"));
 
 setThemeInstance(loadThemeSync("dark"));
@@ -68,7 +40,6 @@ setThemeInstance(loadThemeSync("dark"));
 const ROUNDS = 5;
 const CARD_WIDTH = 100;
 const SECRET = "sk-bench-7f3a9c2e5b8d1f4a6c0e9b2d7a5f3c1e8b6d4a2f";
-// The advisor's redaction: a configured literal plus the host's built-in credential patterns.
 const transform = advisorToolIOTransform(
 	new SecretObfuscator(
 		[{ type: "plain", content: SECRET, mode: "replace", replacement: "[REDACTED]" }, ...builtinCredentialSecretEntries()],
@@ -78,7 +49,6 @@ const transform = advisorToolIOTransform(
 );
 const SENDER: Sender = { kind: "main", pid: 4242, sessionId: "bench-sender", title: "bench sender", cwd: "/tmp/bench" };
 
-/** Deterministic LCG; the seeds below are fixed and used only here. */
 function lcg(seed: number): () => number {
 	let s = seed >>> 0;
 	return () => {
@@ -97,7 +67,6 @@ function word(rand: () => number): string {
 	return w;
 }
 
-/** Lines of seeded words, about `bytes` UTF-8 bytes; `secret` lands across folded column 119. */
 function message(bytes: number, seed: number, secret: boolean): string {
 	const rand = lcg(seed);
 	const lines: string[] = [];
@@ -150,7 +119,6 @@ function heap(): number {
 	return process.memoryUsage().heapUsed;
 }
 
-/** `deliver` of the checkout under test, persisting into `sm` the way the host persists a custom message. */
 function deliverInto(sm: SessionManagerT): (message: string) => void {
 	const pi = {
 		sendMessage: (msg: { customType: string; content: string; display: boolean; details?: unknown }) => {
@@ -158,14 +126,12 @@ function deliverInto(sm: SessionManagerT): (message: string) => void {
 		},
 	};
 	const ctx = { isIdle: () => true, agent: { id: "bench" }, sessionManager: sm };
-	// Unchecked shims: they carry only what `deliver` reaches; the real host objects are far larger.
 	const api = pi as unknown as ExtensionAPI;
 	const context = ctx as unknown as ExtensionContext;
 	const main = localMain(api, context);
 	return (message) => main.deliver(message, SENDER);
 }
 
-/** `details.message` of a persisted or reopened entry, "" when absent. */
 function detailsMessage(details: unknown): string {
 	if (typeof details !== "object" || details === null || !("message" in details)) return "";
 	return typeof details.message === "string" ? details.message : "";
@@ -190,7 +156,6 @@ function ircMessages(sm: SessionManagerT): IrcMessage[] {
 
 async function measure(tier: Tier): Promise<TierRecord> {
 	const text = tier.make();
-	// One entry for the byte count, the field diff and the render replay.
 	const singleDir = mkdtempSync(join(work, "session-"));
 	const single = SessionManager.create(singleDir, singleDir);
 	await single.ensureOnDisk();
@@ -198,9 +163,6 @@ async function measure(tier: Tier): Promise<TierRecord> {
 	await single.flush();
 	const file = single.getSessionFile() ?? "";
 	await single.close();
-	// Heap readings move by tens of KiB between GCs; a batch of deliveries per reading (about 512 KiB
-	// of messages) keeps that noise small per message. Every session stays open until all rounds are
-	// read: memory a dropped session frees is swept lazily and would offset a later round's reading.
 	const batch = Math.min(200, Math.ceil((512 * 1024) / Buffer.byteLength(text)));
 	const deliverHeap: number[] = [];
 	const reloadHeap: number[] = [];
@@ -212,8 +174,6 @@ async function measure(tier: Tier): Promise<TierRecord> {
 		await sm.ensureOnDisk();
 		const deliver = deliverInto(sm);
 		const before = heap();
-		// Messages are built inside the measured window so only the session's references keep them;
-		// the reading is taken once the entries are written, the state the session then keeps.
 		for (let i = 0; i < batch; i++) deliver(tier.make());
 		await sm.flush();
 		deliverHeap.push(Math.round((heap() - before) / batch));
@@ -250,7 +210,6 @@ async function measure(tier: Tier): Promise<TierRecord> {
 	};
 }
 
-/** Paths (dotted) whose JSON values differ between two field sets. */
 function diffPaths(a: unknown, b: unknown, path = ""): string[] {
 	if (typeof a === "object" && a !== null && typeof b === "object" && b !== null && !Array.isArray(a) && !Array.isArray(b)) {
 		const left = new Map(Object.entries(a));
@@ -268,7 +227,6 @@ function check(ok: boolean, label: string): void {
 }
 
 if (args.legacy !== undefined) {
-	// Row 5: a session written by another checkout opens, renders, and keeps taking deliveries here.
 	const legacyCopy = join(mkdtempSync(join(work, "legacy-")), "legacy.jsonl");
 	copyFileSync(args.legacy, legacyCopy);
 	const opened = await SessionManager.open(legacyCopy);
@@ -280,8 +238,6 @@ if (args.legacy !== undefined) {
 	console.log(`legacy summary: ${oldRender.summaryPlain}`);
 	console.log(`legacy card (expanded, ${oldRender.cardExpanded.length} rows):\n${oldRender.cardExpanded.join("\n")}`);
 	check(
-		// `details.message` is the folded text — a bounded prefix in a legacy entry, the whole message in a
-		// new one — so the content must carry it once whitespace is folded the same way.
 		typeof old.content === "string" && legacyText.length > 0 && old.content.replace(/\s+/g, " ").includes(legacyText.replace(/ …$/, "")),
 		"legacy entry: full message still present in the model-visible content",
 	);
@@ -338,9 +294,6 @@ if (args.legacy !== undefined) {
 			const before = detailsMessage(base.entry.details);
 			const after = detailsMessage(now.entry.details);
 			const text = TIERS.find((t) => t.name === now.name)?.make() ?? "";
-			// The entry holds the message twice — the original in `content`, its folded form in
-			// `details.message` — so against a baseline written while `details.message` was a bounded
-			// prefix the entry grows. Bytes and heap stay measurements, not thresholds.
 			console.log(
 				`bytes ${now.name}: entryBytes ${base.entryBytes} -> ${now.entryBytes} (message ${now.messageBytes}); details.message ${before.length} -> ${after.length} chars; heapDeliver ${base.heapDeliver} -> ${now.heapDeliver}; heapReload ${base.heapReload} -> ${now.heapReload}`,
 			);
@@ -357,8 +310,6 @@ if (args.legacy !== undefined) {
 			console.log(`render ${now.name} card after (collapsed, ${now.cardCollapsed.length} rows):\n${now.cardCollapsed.join("\n")}`);
 			const paths = diffPaths(base.entry, now.entry);
 			console.log(`fields ${now.name}: differing fields [${paths.join(", ")}]`);
-			// A tier whose folded text fit the old prefix persists identically; otherwise only the second
-			// copy in `details.message` differs.
 			check(
 				paths.every((p) => p === "details.message"),
 				`fields ${now.name}: differences only in details.message`,

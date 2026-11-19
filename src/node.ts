@@ -1,9 +1,3 @@
-// The process-level node: one IPC endpoint per omp process, `ipcEndpoint(<peers dir>, <pid>)`, serving every
-// main session of the process that registered with it. The endpoint is open exactly while at least one
-// main session is registered; `reconcile` moves the listener to that state after every change.
-//
-// omp evaluates this module again for each ACP session, so module scope is not process scope: the node
-// lives on `globalThis.ompPeersNode`, and every evaluation in the process shares it.
 import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -12,18 +6,6 @@ import { type IpcConnection, IpcServer, ipcEndpoint } from "@oh-my-pi/pi-natives
 import { errorText } from "./errors.ts";
 import { MAX_FRAME_BYTES, parseRequest, type Request, type Response, type Sender, type SessionInfo } from "./protocol.ts";
 
-/**
- * The directory every endpoint of this user is scoped to, per user and profile-independent.
- *
- * POSIX: `/tmp/omp-<uid>/peers`, holding the `<pid>.sock` files and emptied at boot like every endpoint in
- * it (no endpoint outlives its process, and no process outlives the boot). `/tmp/omp-<uid>` is also where
- * the host's `ipcEndpoint` puts sockets whose path is too long.
- *
- * Windows: `<user temp>\omp-peers`, under the user's profile. Endpoints are named pipes outside the file
- * system, `\\.\pipe\omp-<pid>-<hash of this path>`, so the path only scopes the pipe names to the user. It
- * is the real path of the temp directory, so a process that sees it under its 8.3 short name computes the
- * same names.
- */
 export function peersDir(): string {
 	if (process.platform === "win32") return path.join(realpathSync.native(os.tmpdir()), "omp-peers");
 	return path.join("/tmp", `omp-${os.userInfo().uid}`, "peers");
@@ -36,7 +18,7 @@ export function endpointFor(dir: string, pid: number): string {
 /**
  * POSIX only. Create the parent of `dir` if missing and refuse it unless this user owns it with mode 0700:
  * under the world-writable `/tmp`, another user could create it first and then remove or replace endpoints
- * in it. Windows has no endpoint files to protect, and its uid and mode bits do not describe ownership.
+ * in it.
  */
 async function claimPrivateParent(dir: string): Promise<void> {
 	const parent = path.dirname(dir);
@@ -56,25 +38,19 @@ export type AskOutcome =
 	| { kind: "unsupported" }
 	| { kind: "failed"; message: string };
 
-/** A main session of this process. Identity and state are read live, so `/new` and resume need no re-registration. */
 export interface LocalMain {
-	/** Registry id, stable for the lifetime of the session runtime: `Main`, or `acp:<id>` under ACP. */
 	readonly agentId: string;
 	sessionId(): string;
 	title(): string | undefined;
 	cwd(): string;
 	idle(): boolean;
-	/** Answer a side question without touching the main turn or transcript. */
 	ask(question: string, from: Sender, signal: AbortSignal): Promise<AskOutcome>;
-	/** Inject an IRC message into the main session; returns its state at injection. */
 	deliver(message: string, from: Sender): "idle" | "busy";
-	/** Abort an in-flight side question; called when the session leaves the node. */
 	stop(): void;
 }
 
 export type Warn = (message: string, error: unknown) => void;
 
-/** One process's endpoint and its registered main sessions. Tests build their own on a private directory. */
 export class PeerNode {
 	readonly #dir: string;
 	readonly #mains = new Map<string, LocalMain>();
@@ -86,7 +62,6 @@ export class PeerNode {
 		this.#dir = dir;
 	}
 
-	/** Register a main session (replacing one with the same agent id) and open the endpoint if needed. */
 	add(main: LocalMain, warn: Warn): Promise<void> {
 		this.#warn = warn;
 		this.#mains.get(main.agentId)?.stop();
@@ -94,7 +69,6 @@ export class PeerNode {
 		return this.#schedule();
 	}
 
-	/** Unregister a main session; the last one out closes the endpoint. Idempotent. */
 	remove(agentId: string): Promise<void> {
 		const main = this.#mains.get(agentId);
 		if (main === undefined) return this.#reconciling;
@@ -117,7 +91,6 @@ export class PeerNode {
 					{ framing: "lines", maxFrameBytes: MAX_FRAME_BYTES },
 					(connection) => this.#accept(connection),
 				);
-				// The endpoint never keeps omp alive; omp's own exit path closes it.
 				server.unref();
 				this.#server = server;
 			} else if (this.#mains.size === 0 && this.#server !== undefined) {
@@ -206,11 +179,9 @@ function assertNever(value: never): never {
 }
 
 declare global {
-	/** omp-peers' process node, shared by every evaluation of this module in the process. */
 	var ompPeersNode: PeerNode | undefined;
 }
 
 globalThis.ompPeersNode ??= new PeerNode(peersDir());
 
-/** The one node of this process, whichever evaluation of this module created it. */
 export const node: PeerNode = globalThis.ompPeersNode;

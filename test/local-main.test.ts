@@ -12,8 +12,6 @@ type Sent = { customType: string; content: string; display: boolean; details: { 
 const FROM: Sender = { kind: "main", pid: 7, sessionId: "sender", title: "peer", cwd: "/work" };
 const pad = (n: number): string => "w".repeat(n);
 
-// Secret shapes the advisor's redaction knows: configured literals (one with spaces), a configured
-// regex that needs right-hand context, and the host's built-in credential patterns (JWT, PEM, ...).
 const TOKEN = "zq_0123456789abcdefABCDEF0123456789abcd";
 const SPACED = "correct horse battery staple";
 const JWT = `eyJhbGciOiJIUzI1NiJ9.eyJ${"c3ViIjoiMTIzNDU2Nzg5MCJ9".repeat(40)}.${"c2lnbmF0dXJl".repeat(8)}`;
@@ -22,8 +20,6 @@ const PEM = [
 	...Array.from({ length: 50 }, (_, i) => `MIIJQwIBADANBgkqhkiG9w0BAQEFAASCCS0wggkpAgEAAoICAQ${String(i).padStart(14, "0")}`),
 	"-----END PRIVATE KEY-----",
 ].join("\n");
-// Credentials long enough to cross column 4096 of the folded message: a redaction that only saw a
-// prefix cut there could not reach their end and would leave the beginning readable.
 const LONG_PEM = ["-----BEGIN PRIVATE KEY-----", ...Array.from({ length: 110 }, () => "QUJD".repeat(16)), "-----END PRIVATE KEY-----"].join(
 	"\n",
 );
@@ -45,7 +41,6 @@ function deliver(message: string): Sent {
 	const sent: Sent[] = [];
 	const pi = { sendMessage: (msg: Sent) => sent.push(msg) };
 	const ctx = { isIdle: () => true, agent: { id: "main" } };
-	// Unchecked shims: `deliver` reaches only `sendMessage` and `isIdle`.
 	const api = pi as unknown as ExtensionAPI;
 	const context = ctx as unknown as ExtensionContext;
 	localMain(api, context).deliver(message, FROM);
@@ -54,7 +49,6 @@ function deliver(message: string): Sent {
 	return only;
 }
 
-/** The host's session summary line for an `irc:incoming` entry whose `details.message` is `text`. */
 function summaryLine(text: string, redact: boolean): string {
 	const entry = {
 		role: "custom",
@@ -101,8 +95,6 @@ describe("deliver keeps the full message in content and its folded form in detai
 			expect(sent.customType).toBe("irc:incoming");
 			expect(sent.content).toContain(message);
 			expect(sent.details.from).toBe("peer (pid 7)");
-			// Folded, whole and well formed: the host redacts the full text before it previews the entry,
-			// so a cut here would leave a credential fragment it can no longer recognize.
 			expect(sent.details.message).toBe(message.replace(/\s+/g, " ").trim());
 			expect(sent.details.message).not.toContain("\n");
 			expect(sent.details.message.endsWith(" …")).toBe(false);

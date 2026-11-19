@@ -7,7 +7,6 @@ import type * as NodeModule from "../src/node.ts";
 import { type AskOutcome, endpointFor, type LocalMain, node, PeerNode } from "../src/node.ts";
 import { MAX_FRAME_BYTES, PROTOCOL_VERSION, type Sender, truncateUtf8, type WireRequest } from "../src/protocol.ts";
 
-// A private peers directory, so tests never join the user's real peers under /tmp/omp-<uid>.
 const DIR = join(mkdtempSync(join(tmpdir(), "omp-peers-node-")), "peers");
 const peers = new PeerNode(DIR);
 
@@ -98,7 +97,6 @@ describe("node lifecycle", () => {
 		expect(await survey(DIR)).toEqual([]);
 	});
 
-	// Ownership and mode bits are checked on POSIX only; Windows endpoints are named pipes outside the file system.
 	test.skipIf(process.platform === "win32")("a parent directory other users can enter is refused and no endpoint opens", async () => {
 		const open = mkdtempSync(join(tmpdir(), "omp-peers-open-"));
 		chmodSync(open, 0o755);
@@ -113,7 +111,6 @@ describe("node lifecycle", () => {
 	});
 
 	test("every evaluation of the node module in one process shares one node", async () => {
-		// omp evaluates the plugin again per ACP session; a second evaluation must not open a second endpoint.
 		const again: typeof NodeModule = await import(`../src/node.ts?evaluation=${Date.now()}`);
 		expect(again.node).toBe(node);
 	});
@@ -190,7 +187,6 @@ describe("request parsing at the endpoint", () => {
 	test("a request from another protocol version or with a missing field is refused, not served", async () => {
 		const main = fakeMain("Main", "s-1", answering("x"));
 		await add(main);
-		// Deliberately ill-typed requests: what another plugin version or a broken client could send.
 		const later = await exchange(DIR, process.pid, { v: 2, kind: "list" } as never, 1_000);
 		expect(later.kind === "response" && later.response.kind === "error" && later.response.code).toBe("unsupported_version");
 		const missing = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from: FROM } as never, 1_000);
@@ -201,41 +197,28 @@ describe("request parsing at the endpoint", () => {
 
 describe("truncateUtf8", () => {
 	test("cuts on a character boundary and reports the cut", () => {
-		// "é" is two UTF-8 bytes: a 3-byte cap must not split the second one.
 		expect(truncateUtf8("éé", 3)).toEqual({ text: "é", truncated: true });
 		expect(truncateUtf8("éé", 4)).toEqual({ text: "éé", truncated: false });
 	});
 
 	test("a cut landing inside a character decodes to the replacement char, like the whole-string cut did", () => {
-		// "é" is two UTF-8 bytes: a 1-byte cap backs the cut up to 0 bytes and
-		// the remaining lead byte is discarded with the tail.
 		expect(truncateUtf8("é", 1)).toEqual({ text: "", truncated: true });
 		expect(truncateUtf8("é中", 2)).toEqual({ text: "é", truncated: true });
 	});
 
 	test("a four-byte character too wide for the cap truncates to the prefix before it", () => {
-		// "🜛" is four UTF-8 bytes; a 3-byte cap keeps nothing of it.
 		expect(truncateUtf8("a🜛", 4)).toEqual({ text: "a", truncated: true });
 		expect(truncateUtf8("🜛", 3)).toEqual({ text: "", truncated: true });
 	});
 
 	test("a character starting exactly at the cut is left to the tail, structurally", () => {
-		// "中" (three bytes) starting at byte offset 3 and 4: the cut lands where
-		// the next character begins, so the kept prefix ends on a boundary and
-		// contains no partial lead byte.
 		expect(truncateUtf8("a中", 4)).toEqual({ text: "a中", truncated: false });
 		expect(truncateUtf8("中a中", 6)).toEqual({ text: "中a", truncated: true });
 	});
 
 	test("a lone surrogate and a leading BOM behave like an encode round trip", () => {
-		// A lone surrogate encodes to three replacement bytes (0xEF 0xBF 0xBD);
-		// with caps 4 and 5 the whole encoding fits, so nothing is cut — but the
-		// short path still returns the original string, not the encoded form.
 		expect(truncateUtf8("\uD800", 4)).toEqual({ text: "\uD800", truncated: false });
 		expect(truncateUtf8("\uD800", 5)).toEqual({ text: "\uD800", truncated: false });
-		// A leading U+FEFF is eaten on the way through the encoder, both whole
-		// and when the cut lands inside the eaten three bytes: the decode of the
-		// kept part may be empty where the model-visible byte count still grew.
 		expect(truncateUtf8("\uFEFFx", 3)).toEqual({ text: "", truncated: true });
 		expect(truncateUtf8("\uFEFFx", 2)).toEqual({ text: "", truncated: true });
 		expect(truncateUtf8("\uFEFFx", 1)).toEqual({ text: "", truncated: true });

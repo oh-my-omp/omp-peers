@@ -1,5 +1,3 @@
-// The receiving side of one main session: answers side questions through the host's /btw executor
-// and injects IRC messages into the session. Built from the session's `session_start` context.
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "./errors.ts";
 import type { AskOutcome, LocalMain } from "./node.ts";
@@ -43,7 +41,6 @@ function ircContent(message: string, from: Sender): string {
 }
 
 export function localMain(pi: ExtensionAPI, ctx: ExtensionContext): LocalMain {
-	/** The side question being answered; one at a time, held until the side turn settles. */
 	let answering: AbortController | undefined;
 
 	async function ask(question: string, from: Sender, closed: AbortSignal): Promise<AskOutcome> {
@@ -54,8 +51,6 @@ export function localMain(pi: ExtensionAPI, ctx: ExtensionContext): LocalMain {
 		const onClosed = (): void => controller.abort();
 		closed.addEventListener("abort", onClosed, { once: true });
 		try {
-			// Infinity keeps the host's repeated-line dedupe without its 4 KiB one-liner cap; the
-			// protocol cap below is applied here, where truncation is known.
 			const result = await ctx.runEphemeralTurn({
 				promptText: askPrompt(question, from),
 				signal: controller.signal,
@@ -78,8 +73,7 @@ export function localMain(pi: ExtensionAPI, ctx: ExtensionContext): LocalMain {
 				customType: "irc:incoming",
 				content: ircContent(message, from),
 				display: true,
-				// The host's IRC card and session summary line render `from` and `message`; the model reads
-				// `content`, which keeps the original text. `message` is that text folded onto one line and
+				// `message` is that text folded onto one line and
 				// left whole: the host redacts secrets on the full text before it previews the entry, and a
 				// cut made here would leave a fragment no later pass can recognize.
 				details: {
@@ -90,7 +84,6 @@ export function localMain(pi: ExtensionAPI, ctx: ExtensionContext): LocalMain {
 					message: message.replace(/\s+/g, " ").trim(),
 				},
 			},
-			// aside: idle starts a turn; streaming reads it at the next step without breaking the tool batch.
 			{ deliverAs: "aside", triggerTurn: true },
 		);
 		return recipient;

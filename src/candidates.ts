@@ -1,5 +1,4 @@
-// omp processes that run without omp-peers, from omp's own project presence records
-// (`<state>/run/daemons/<scope>/clients/<pid>-<uuid>.json`). These records outlive crashed
+// These records outlive crashed
 // processes and a pid can be reused, so a live pid here is a candidate, never a reachable peer.
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -9,7 +8,6 @@ async function entries(dir: string): Promise<string[]> {
 	try {
 		return await fs.readdir(dir);
 	} catch {
-		// A scope without a clients directory, or no daemon runtime yet.
 		return [];
 	}
 }
@@ -19,12 +17,10 @@ function pidIsLive(pid: number): boolean {
 		process.kill(pid, 0);
 		return true;
 	} catch {
-		// ESRCH: gone. EPERM: another user's process, which is not one of ours.
 		return false;
 	}
 }
 
-/** Live pids recorded as omp processes that are neither this process nor among `bridged`. */
 export async function unbridgedOmpPids(bridged: ReadonlySet<number>): Promise<number[]> {
 	const root = getDaemonRuntimeRoot();
 	const pids = new Set<number>();

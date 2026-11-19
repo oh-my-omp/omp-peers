@@ -1,6 +1,3 @@
-// The three model-facing tools. Each call reads the live peers at that moment; nothing is cached.
-// Main sessions and subagents both call them; only a main session is a peer that can be answered by
-// `peer_send`, so a subagent asks and sends one-way.
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { type ExtensionContext, type ToolDefinition, z } from "@oh-my-pi/pi-coding-agent";
 import { tr } from "../omomp-shared/i18n.ts";
@@ -66,7 +63,6 @@ async function list(ctx: ExtensionContext): Promise<Result> {
 	return text([header, ...lines, ...footer].join("\n"));
 }
 
-/** Resolve `to` and refuse yourself; returns the peer pid and full session id, or the refusal. */
 async function target(
 	to: string,
 	ctx: ExtensionContext,
@@ -175,7 +171,6 @@ const sendParams = z.object({ to: toParam, message: boundedText("The message") }
 
 type Topics = { docTopics(): Readonly<Record<string, string>> };
 
-/** Turn a thrown error into an error result: tools never throw into omp. */
 async function guarded(run: () => Promise<Result>): Promise<Result> {
 	try {
 		return await run();
@@ -184,7 +179,6 @@ async function guarded(run: () => Promise<Result>): Promise<Result> {
 	}
 }
 
-/** The tool definitions, all top-level (`loadMode: "essential"`) rather than `xd://` devices; called once per extension binding, so labels follow the UI language of that session. */
 export const peerTools = () =>
 	[
 		{

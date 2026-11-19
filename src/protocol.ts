@@ -1,14 +1,8 @@
-// Wire protocol between omp-peers nodes: one JSON request line per connection, answered by one
-// JSON response line, then the connection closes. Both sides parse what they receive here once,
-// at the boundary, into the request and response unions below.
 import { z } from "@oh-my-pi/pi-coding-agent";
 
 export const PROTOCOL_VERSION = 1;
-/** UTF-8 byte cap of a question or an IRC message. */
 export const MAX_TEXT_BYTES = 64 * 1024;
-/** UTF-8 byte cap of an answer sent back to the asker. */
 export const MAX_ANSWER_BYTES = 32 * 1024;
-/** Largest line either side accepts; a request is bounded by MAX_TEXT_BYTES plus small metadata. */
 export const MAX_FRAME_BYTES = 1024 * 1024;
 
 const utf8 = new TextEncoder();
@@ -17,27 +11,17 @@ export function utf8Bytes(text: string): number {
 	return utf8.encode(text).byteLength;
 }
 
-/** UTF-8-capable decoder shared by the truncation path; default options, so a
- * leading BOM is eaten and lone surrogates decode to U+FFFD exactly as an
- * encode+decode round trip does. */
 const utf8Decode = new TextDecoder();
 
-/** `text` cut to at most `maxBytes` UTF-8 bytes on a character boundary. */
 export function truncateUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
 	if (text.length * 3 <= maxBytes) return { text, truncated: false };
-	// Buffer of maxBytes+3: a code point that starts at or before maxBytes-1
-	// and is at most 4 bytes wide always fits in it. encodeInto stops before
-	// any code point that does not fit into the buffer.
 	const buf = new Uint8Array(Math.min(maxBytes + 3, text.length * 3));
 	const { written, read } = utf8.encodeInto(text, buf);
 	if (written <= maxBytes) {
-		// encodeInto either consumed the whole string or stopped on a code point
-		// boundary, so `written` is a cut-safe byte count.
 		if (read === text.length) return { text, truncated: false };
 		return { text: utf8Decode.decode(buf.subarray(0, written)), truncated: true };
 	}
 	let end = maxBytes;
-	// Back up over continuation bytes (10xxxxxx) so the cut never splits a character.
 	while (end > 0 && ((buf[end] ?? 0) & 0xc0) === 0x80) end--;
 	return { text: utf8Decode.decode(buf.subarray(0, end)), truncated: true };
 }
@@ -47,11 +31,6 @@ const boundedText = z
 	.min(1)
 	.refine((text) => utf8Bytes(text) <= MAX_TEXT_BYTES, { message: `longer than ${MAX_TEXT_BYTES} UTF-8 bytes` });
 
-/**
- * Who sent a request, as it described itself when sending. A main session can be replied to with
- * `peer_send`; a subagent is not a peer, so what it sends is one-way. On the wire a subagent adds
- * its registry id as `subagent`; senders that predate it omit the field and are main sessions.
- */
 const wireSenderSchema = z.object({
 	pid: z.number().int().positive(),
 	sessionId: z.string().min(1),
@@ -73,7 +52,6 @@ interface Origin {
 }
 export type Sender = ({ kind: "main" } & Origin) | ({ kind: "sub"; agentId: string } & Origin);
 
-/** The wire form of a sender, the inverse of `senderSchema`. */
 export function senderWire(sender: Sender): WireSender {
 	switch (sender.kind) {
 		case "main": {
@@ -93,13 +71,11 @@ const requestSchema = z.union([
 	z.object({ v: z.literal(PROTOCOL_VERSION), kind: z.literal("irc"), to: z.string().min(1), from: senderSchema, message: boundedText }),
 ]);
 export type Request = z.infer<typeof requestSchema>;
-/** A request as it goes on the wire, before the receiving endpoint parses it into `Request`. */
 export type WireRequest =
 	| Extract<Request, { kind: "list" }>
 	| (Omit<Extract<Request, { kind: "ask" }>, "from"> & { from: WireSender })
 	| (Omit<Extract<Request, { kind: "irc" }>, "from"> & { from: WireSender });
 
-/** One main session a node serves, read live when a list request arrives. */
 const sessionSchema = z.object({
 	sessionId: z.string(),
 	title: z.string().optional(),
@@ -122,7 +98,6 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 const responseSchema = z.union([
 	z.object({ kind: z.literal("sessions"), pid: z.number().int(), sessions: z.array(sessionSchema) }),
 	z.object({ kind: z.literal("answer"), text: z.string(), truncated: z.boolean() }),
-	/** `recipient` is the target's state when the message was injected: idle starts a turn, busy reads it at the next step. */
 	z.object({ kind: z.literal("accepted"), recipient: z.enum(["idle", "busy"]) }),
 	z.object({ kind: z.literal("error"), code: z.enum(ERROR_CODES), message: z.string() }),
 ]);

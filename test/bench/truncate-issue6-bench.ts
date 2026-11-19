@@ -1,20 +1,3 @@
-// Bench + byte-equivalence harness for the issue-6 truncateUtf8 fix (child A).
-// Synthetic reply loads per tree-root §4: three tiers — below the 32 KiB cap,
-// above the cap, and a cut landing mid multi-byte-char — built from a seeded
-// deterministic generator with a controlled multi-byte ratio, plus a repeated
-// -lines variant (folding is host behavior; this plugin must not introduce any
-// and must return the input bytes unchanged).
-//
-// Usage:
-//   bun test/bench/truncate-issue6-bench.ts            # medians + byte lines
-//   bun test/bench/truncate-issue6-bench.ts --bytes <baseline.json>
-//     # additionally diffs this run's outputs against a saved baseline dump
-//   bun test/bench/truncate-issue6-bench.ts --dump <out.json>
-//     # save this run's outputs (text bytes + truncated) for cross-commit diff
-//
-// Metrics per load: per-call heapUsed delta (Bun.gc() before each measurement,
-// median of ROUNDS rounds) and per-call wall time (median of ROUNDS rounds).
-// Every failure exits non-zero so evidence capture sees it.
 import { truncateUtf8 } from "../../src/protocol.ts";
 
 export const CAP = 32 * 1024;
@@ -25,7 +8,6 @@ export type Load = {
 	expectTruncated: boolean;
 };
 
-/** Deterministic LCG; seeds below were fixed once and are never reused elsewhere. */
 function lcg(seed: number): () => number {
 	let s = seed >>> 0;
 	return () => {
@@ -41,7 +23,6 @@ function isContinuation(byte: number | undefined): boolean {
 	return byte !== undefined && (byte & 0xc0) === 0x80;
 }
 
-/** ASCII text of an exact UTF-8 byte length, built from seeded words. */
 function asciiOfBytes(target: number, seed: number): string {
 	const rand = lcg(seed);
 	const parts: string[] = [];
@@ -53,11 +34,9 @@ function asciiOfBytes(target: number, seed: number): string {
 		parts.push(w);
 		len += w.length + 1;
 	}
-	// ASCII only ⇒ byte-length == char-length, slicing is safe.
 	return parts.join(" ").slice(0, target);
 }
 
-/** ASCII text of approximately `target` bytes, words joined by spaces. */
 function asciiRoughly(target: number, seed: number): string {
 	const rand = lcg(seed);
 	const parts: string[] = [];
@@ -72,7 +51,6 @@ function asciiRoughly(target: number, seed: number): string {
 	return parts.join(" ");
 }
 
-/** ~300 KiB reply, mostly ASCII with a controlled ~2% multi-byte ratio. */
 function aboveCap(): string {
 	const rand = lcg(45645);
 	const parts: string[] = [];
@@ -88,9 +66,6 @@ function aboveCap(): string {
 	return parts.join(" ");
 }
 
-/** Cut lands mid multi-byte char: CAP-2 ASCII bytes + "中" (3 bytes). The naive
- * cut at CAP splits the 中; the boundary-safe cut must return CAP-2 bytes plus
- * the encoder's chosen replacement for the 1 lead byte (baseline: U+FFFD). */
 function midChar(): Load {
 	const prefix = asciiOfBytes(CAP - 2, 78979);
 	const text = `${prefix}中tail`;
@@ -101,9 +76,6 @@ function midChar(): Load {
 	return { name: "mid-char-cut", reply: text, expectTruncated: true };
 }
 
-/** Long answer made of 120 identical lines (> 4 KiB, below cap): a host with
- * dedupe would fold this; with replyMaxBytes: Infinity the plugin passes it
- * through and truncateUtf8 must return every byte. */
 function repeatedLines(): string {
 	const rand = lcg(24680);
 	const n = 3 + Math.floor(rand() * 8);

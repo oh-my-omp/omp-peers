@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-21
+
 ### Fixed
 
 - omp-peers loads again on omp 19 (it imported getDaemonRuntimeRoot, which omp 19 removed)

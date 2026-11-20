@@ -12,7 +12,7 @@ import {
 	ASK_TIMEOUT_MS,
 	addressedSessions,
 	DELIVER_TIMEOUT_MS,
-	type Exchange,
+	type ExchangeFailure,
 	exchange,
 	type PeerAddress,
 	parseAddress,
@@ -62,7 +62,7 @@ async function list(context: ResolveContext | undefined): Promise<string> {
 	].join("\n");
 }
 
-function failure(exchanged: Exclude<Exchange, { kind: "response" }>, address: string): InternalWriteResult {
+function failure(exchanged: ExchangeFailure, address: string): InternalWriteResult {
 	switch (exchanged.kind) {
 		case "unreachable":
 			return result(`peer://${address} is unreachable: its omp process is gone (${exchanged.reason}).`, true);
@@ -84,8 +84,10 @@ async function deliver(
 	from: Sender,
 	signal: AbortSignal | undefined,
 ): Promise<InternalWriteResult> {
-	const resolved = await resolveTarget(peersDir(), address);
+	const resolved = await resolveTarget(peersDir(), address, signal);
 	switch (resolved.kind) {
+		case "failed":
+			return failure(resolved.failure, (url.rawHost || url.hostname) + url.pathname);
 		case "not_found":
 			return result(`No main session at ${url.href}. Online: ${resolved.online.map((a) => `peer://${a}`).join(", ") || "none"}.`, true);
 		case "ambiguous":

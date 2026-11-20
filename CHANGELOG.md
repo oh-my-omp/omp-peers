@@ -10,7 +10,7 @@
 ### Added
 
 - Added the plugin setting `enabled` (default on; `/settings` → Plugins or `omp plugin config`): turned off, an omp process opens no peer endpoint and offers no `peer://`; a change takes effect when omp next starts
-- Added peer:// write errors for missing, ambiguous, unlisted or self targets and validation for malformed addresses, unsupported query parameters, empty content or oversized content
+- Added peer:// write errors for missing, unreachable, ambiguous, unlisted or self targets and validation for malformed addresses, unsupported query parameters, empty content or oversized content
 - An omp process accepts at most 20 messages per 10 minutes from any one other omp process; further messages are refused with `budget_exceeded`, so two models cannot wake each other forever (side questions are not counted)
 
 ### Changed

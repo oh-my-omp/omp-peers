@@ -226,6 +226,13 @@ describe("peer addresses", () => {
 			online: [`${process.pid}/s-1`, `${process.pid}/s-2`],
 		});
 	});
+
+	test.skipIf(process.platform === "win32")("an endpoint file nobody listens on is unreachable, not missing", async () => {
+		mkdirSync(DIR, { recursive: true });
+		writeFileSync(join(DIR, "999998.sock"), "");
+		const dead = await resolveTarget(DIR, { pid: 999_998, sessionId: undefined });
+		expect(dead.kind === "failed" && dead.failure.kind).toBe("unreachable");
+	});
 });
 
 describe("request parsing at the endpoint", () => {

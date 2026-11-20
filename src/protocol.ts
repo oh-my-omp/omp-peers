@@ -36,13 +36,14 @@ const wireSenderSchema = z.object({
 	sessionId: z.string().min(1),
 	title: z.string().optional(),
 	cwd: z.string(),
+	address: z.string().min(1).optional(),
 	subagent: z.string().min(1).optional(),
 });
 type WireSender = z.infer<typeof wireSenderSchema>;
-const senderSchema = wireSenderSchema.transform(
-	({ subagent, ...origin }): Sender =>
-		subagent === undefined ? { kind: "main", ...origin } : { kind: "sub", agentId: subagent, ...origin },
-);
+const senderSchema = wireSenderSchema.transform(({ subagent, address, ...origin }): Sender => {
+	if (subagent !== undefined) return { kind: "sub", agentId: subagent, ...origin };
+	return { kind: "main", address: address ?? String(origin.pid), ...origin };
+});
 
 interface Origin {
 	pid: number;
@@ -50,7 +51,7 @@ interface Origin {
 	title?: string;
 	cwd: string;
 }
-export type Sender = ({ kind: "main" } & Origin) | ({ kind: "sub"; agentId: string } & Origin);
+export type Sender = ({ kind: "main"; address: string } & Origin) | ({ kind: "sub"; agentId: string } & Origin);
 
 export function senderWire(sender: Sender): WireSender {
 	switch (sender.kind) {
@@ -92,6 +93,7 @@ export const ERROR_CODES = [
 	"ask_unsupported",
 	"ask_failed",
 	"delivery_failed",
+	"budget_exceeded",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

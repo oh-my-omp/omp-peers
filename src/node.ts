@@ -51,9 +51,19 @@ export interface LocalMain {
 
 export type Warn = (message: string, error: unknown) => void;
 
+/** Messages one source process may deliver here per {@link WAKE_WINDOW_MS}, the host agent mesh's own bound. */
+export const WAKE_BUDGET = 20;
+export const WAKE_WINDOW_MS = 10 * 60_000;
+
+/** `<pid>` while the process has one main session, `<pid>/<sessionId>` once several share it. */
+export function peerAddress(pid: number, sessionId: string, mainCount: number): string {
+	return mainCount > 1 ? `${pid}/${sessionId}` : String(pid);
+}
+
 export class PeerNode {
 	readonly #dir: string;
 	readonly #mains = new Map<string, LocalMain>();
+	readonly #wakes = new Map<number, number[]>();
 	#server: IpcServer | undefined;
 	#reconciling: Promise<void> = Promise.resolve();
 	#warn: Warn = () => {};
@@ -75,6 +85,14 @@ export class PeerNode {
 		main.stop();
 		this.#mains.delete(agentId);
 		return this.#schedule();
+	}
+
+	/** The registered main session with this session id, so a local sender can name its own address and title. */
+	main(sessionId: string): { address: string; title: string | undefined } | undefined {
+		for (const main of this.#mains.values()) {
+			if (main.sessionId() === sessionId) return { address: peerAddress(process.pid, sessionId, this.#mains.size), title: main.title() };
+		}
+		return undefined;
 	}
 
 	#schedule(): Promise<void> {
@@ -154,10 +172,30 @@ export class PeerNode {
 			case "irc": {
 				const main = this.#target(request.to);
 				if (main === undefined) return notFound(request.to);
+				if (!this.#spendWake(request.from.pid)) {
+					return {
+						kind: "error",
+						code: "budget_exceeded",
+						message: `pid ${process.pid} accepts at most ${WAKE_BUDGET} messages per ${WAKE_WINDOW_MS / 60_000} minutes from one omp process; pid ${request.from.pid} reached it`,
+					};
+				}
 				return { kind: "accepted", recipient: main.deliver(request.message, request.from) };
 			}
 		}
 		return assertNever(request);
+	}
+
+	/** Count one delivered message from `pid`: two models messaging each other stop at the budget instead of waking each other forever. */
+	#spendWake(pid: number): boolean {
+		const now = Date.now();
+		const recent = (this.#wakes.get(pid) ?? []).filter((at) => now - at < WAKE_WINDOW_MS);
+		if (recent.length >= WAKE_BUDGET) {
+			this.#wakes.set(pid, recent);
+			return false;
+		}
+		recent.push(now);
+		this.#wakes.set(pid, recent);
+		return true;
 	}
 
 	#target(sessionId: string): LocalMain | undefined {

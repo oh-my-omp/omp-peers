@@ -1,7 +1,6 @@
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { type ExtensionContext, type ToolDefinition, z } from "@oh-my-pi/pi-coding-agent";
 import { tr } from "../omomp-shared/i18n.ts";
-import { unbridgedOmpPids } from "./candidates.ts";
 import { ASK_TIMEOUT_MS, DELIVER_TIMEOUT_MS, type Exchange, exchange, resolveTarget, survey } from "./client.ts";
 import { errorText } from "./errors.ts";
 import { peersDir } from "./node.ts";
@@ -54,13 +53,8 @@ async function list(ctx: ExtensionContext): Promise<Result> {
 				break;
 		}
 	}
-	const unbridged = await unbridgedOmpPids(new Set(peers.map((peer) => peer.pid)));
 	const header = `${peers.length} omp process(es) reachable through omp-peers, ${mains} main session(s):`;
-	const footer =
-		unbridged.length === 0
-			? []
-			: [`Other omp processes without omp-peers (candidates; cannot be asked or messaged): pid ${unbridged.join(", ")}.`];
-	return text([header, ...lines, ...footer].join("\n"));
+	return text([header, ...lines].join("\n"));
 }
 
 async function target(
@@ -184,7 +178,7 @@ export const peerTools = () =>
 		{
 			name: "peer_list",
 			label: tr("Peers", "Peer 列表"),
-			description: `Lists the live omp processes of this user that run omp-peers and their main sessions (id, title, cwd, idle or busy), plus omp processes without omp-peers.
+			description: `Lists the live omp processes of this user that run omp-peers and their main sessions (id, title, cwd, idle or busy).
 Available to main sessions and subagents; only main sessions register as peers.
 
 Topics — read the one a call needs before making it:

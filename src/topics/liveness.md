@@ -6,4 +6,3 @@
 - `idle` / `busy` is whether that session's main turn was running when it was listed.
 - A session id changes on `/new` and on resume. List again instead of reusing an id from earlier in the conversation.
 - Nothing is pushed: arrivals and exits show up the next time you list.
-- `Other omp processes without omp-peers` come from omp's own project presence records whose pid is still running. They are candidates: a record can outlive its process and a pid can be reused. They cannot be asked or messaged.

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- omp-peers loads again on omp 19 (it imported getDaemonRuntimeRoot, which omp 19 removed)
+
+### Removed
+
+- peer_list no longer lists omp processes that are not bridged, because omp 19 no longer exposes them to plugins
+
 ## [0.2.1] - 2026-11-19
 
 ### Changed

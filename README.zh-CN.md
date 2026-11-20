@@ -9,7 +9,6 @@
   - 注销与关闭 — 功能：移除主会话，最后一个主会话离开时关闭端点；`kill -9` 和 RPC 模式下的信号会跳过它，留下一个拒绝连接的 socket 文件。时机：`session_shutdown`。实例：`/quit`、两次 Ctrl+C 或 `kill -TERM` 会关闭端点。
 - **发现（`peer_list`）**
   - `peer_list` 工具 — 功能：列出运行 omp-peers 的存活 omp 进程及其主会话（id、标题、cwd、idle 或 busy）。时机：主会话或子代理调用时（顶层工具，`loadMode: "essential"`，审批 `read`）。实例：`2 omp process(es) reachable through omp-peers, 3 main session(s):`，随后是 `  - <sessionId> "<title>" — <cwd> — idle`。
-  - 未装 omp-peers 的候选 — 功能：报告项目在线记录里 pid 仍在运行的 omp 进程，作为不能提问也不能发消息的候选。时机：每次 `peer_list` 结果。实例：从 `~/.omp/run/daemons/<scope>/clients/` 读出 `Other omp processes without omp-peers (candidates; cannot be asked or messaged): pid 4182.`
   - `xd://peer_list/liveness` — 功能：说明谁算存活、`alive, session list unavailable`（2 秒内未列出会话）、idle/busy，以及会话 id 在 `/new` 和恢复时会变。时机：模型在依赖存活状态前读取时。实例：``A session id changes on `/new` and on resume. List again …``。
 - **旁路提问（`peer_ask`）**
   - `peer_ask` 工具 — 功能：向另一个主会话提一个 /btw 式旁路问题，答案经本次调用返回。时机：主会话或子代理调用时（审批 `read`）；最多等 5 分钟，取消会中止目标的旁路轮次。实例：`peer_ask({ to: "01a1f4a1", question: "Which branch are you on?" })` → `Answer from session <id> (pid <pid>):`。

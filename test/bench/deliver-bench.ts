@@ -2,7 +2,7 @@ import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { CustomMessageEntry, ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { SessionManager as SessionManagerT } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type * as LocalMainModule from "../../src/local-main.ts";
 import type { Sender } from "../../src/protocol.ts";
@@ -17,6 +17,7 @@ const { formatSessionHistoryMarkdown } = await import("@oh-my-pi/pi-coding-agent
 const { SecretObfuscator } = await import("@oh-my-pi/pi-coding-agent/secrets/obfuscator");
 const { builtinCredentialSecretEntries } = await import("@oh-my-pi/pi-coding-agent/secrets/index");
 const { advisorToolIOTransform } = await import("@oh-my-pi/pi-coding-agent/advisor/delta-split");
+const { normalizeCustomMessagePayload } = await import("@oh-my-pi/pi-coding-agent/session/messages");
 const { buildIrcMessageCard } = await import("@oh-my-pi/pi-tui/chat/transcript-render-helpers");
 const { loadThemeSync } = await import("@oh-my-pi/pi-tui/theme/loader");
 const { setThemeInstance } = await import("@oh-my-pi/pi-tui/theme/theme");
@@ -95,7 +96,7 @@ const TIERS: Tier[] = [
 	{ name: "large-64k", make: () => message(63 * 1024, 0x7e5a2, true) },
 ];
 
-type EntryFields = { customType: unknown; content: unknown; display: unknown; details: unknown; attribution: unknown };
+type EntryFields = Pick<CustomMessageEntry, "customType" | "content" | "display" | "details" | "attribution">;
 type TierRecord = {
 	name: string;
 	messageBytes: number;
@@ -121,7 +122,8 @@ function heap(): number {
 
 function deliverInto(sm: SessionManagerT): (message: string) => void {
 	const pi = {
-		sendMessage: (msg: { customType: string; content: string; display: boolean; details?: unknown }) => {
+		sendMessage: (message: Parameters<ExtensionAPI["sendMessage"]>[0]) => {
+			const msg = normalizeCustomMessagePayload(message);
 			sm.appendCustomMessageEntry(msg.customType, msg.content, msg.display, msg.details);
 		},
 	};
@@ -187,7 +189,7 @@ async function measure(tier: Tier): Promise<TierRecord> {
 		.split("\n")
 		.find((l) => l.includes('"customType":"irc:incoming"'));
 	if (line === undefined) throw new Error(`${tier.name}: no irc:incoming entry in ${file}`);
-	const raw = JSON.parse(line) as Record<string, unknown>;
+	const raw = JSON.parse(line) as CustomMessageEntry;
 	const reopened = await SessionManager.open(file);
 	const [message] = ircMessages(reopened);
 	await reopened.close();

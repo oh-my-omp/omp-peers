@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { CustomMessage, CustomMessagePayload, ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { advisorToolIOTransform } from "@oh-my-pi/pi-coding-agent/advisor/delta-split";
 import { builtinCredentialSecretEntries } from "@oh-my-pi/pi-coding-agent/secrets/index";
 import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
@@ -7,7 +7,9 @@ import { formatSessionHistoryMarkdown } from "@oh-my-pi/pi-coding-agent/session/
 import { localMain } from "../src/local-main.ts";
 import type { Sender } from "../src/protocol.ts";
 
-type Sent = { customType: string; content: string; display: boolean; details: { from: string; message: string } };
+/** The `irc:incoming` details omp-peers attaches; the payload shape itself comes from the host. */
+type IrcDetails = { from: string; message: string };
+type Sent = Exclude<CustomMessagePayload<IrcDetails>, string> & { details: IrcDetails };
 
 const FROM: Sender = { kind: "main", pid: 7, sessionId: "sender", title: "peer", cwd: "/work" };
 const pad = (n: number): string => "w".repeat(n);
@@ -57,7 +59,7 @@ function summaryLine(text: string, redact: boolean): string {
 		display: true,
 		details: { from: "peer", message: text },
 		timestamp: 0,
-	};
+	} satisfies CustomMessage<IrcDetails>;
 	return formatSessionHistoryMarkdown([entry], redact ? { transformExpandedToolIO: transform } : undefined);
 }
 

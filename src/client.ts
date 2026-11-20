@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { IpcConnection } from "@oh-my-pi/pi-natives";
 import { errorText } from "./errors.ts";
-import { endpointFor } from "./node.ts";
+import { endpointFor, peerAddress } from "./node.ts";
 import { MAX_FRAME_BYTES, parseResponse, type Response, type SessionInfo, type WireRequest } from "./protocol.ts";
 
 const CONNECT_TIMEOUT_MS = 1_000;
@@ -114,28 +114,57 @@ async function observe(dir: string, pid: number): Promise<PeerProcess | undefine
 	}
 }
 
-export type Target =
-	| { kind: "found"; pid: number; session: SessionInfo }
-	| { kind: "not_found"; known: readonly string[] }
-	| { kind: "ambiguous"; candidates: readonly { pid: number; sessionId: string }[] };
+/** A parsed `peer://` address: `<pid>`, or `<pid>/<sessionId>` for one of several main sessions in that process. */
+export type PeerAddress = { pid: number; sessionId: string | undefined };
 
-export async function resolveTarget(dir: string, to: string): Promise<Target> {
-	const peers = await survey(dir);
-	const known: string[] = [];
-	const exact: { pid: number; session: SessionInfo }[] = [];
-	const prefixed: { pid: number; session: SessionInfo }[] = [];
-	for (const peer of peers) {
-		if (peer.sessions.kind !== "listed") continue;
-		for (const session of peer.sessions.list) {
-			known.push(session.sessionId);
-			if (session.sessionId === to) exact.push({ pid: peer.pid, session });
-			else if (session.sessionId.startsWith(to)) prefixed.push({ pid: peer.pid, session });
-		}
+export function parseAddress(host: string, path: string): PeerAddress | undefined {
+	if (!/^[1-9]\d*$/.test(host)) return undefined;
+	const pid = Number(host);
+	if (!Number.isSafeInteger(pid)) return undefined;
+	const segments = path.split("/").filter((segment) => segment !== "");
+	if (segments.length === 0) return { pid, sessionId: undefined };
+	const [only, ...rest] = segments;
+	if (only === undefined || rest.length > 0) return undefined;
+	try {
+		return { pid, sessionId: decodeURIComponent(only) };
+	} catch {
+		return undefined;
 	}
-	const matches = exact.length > 0 ? exact : prefixed;
-	const [only, ...rest] = matches;
-	if (only === undefined) return { kind: "not_found", known };
-	if (rest.length > 0)
-		return { kind: "ambiguous", candidates: matches.map((match) => ({ pid: match.pid, sessionId: match.session.sessionId })) };
-	return { kind: "found", pid: only.pid, session: only.session };
+}
+
+export type AddressedSession = { address: string; pid: number; session: SessionInfo };
+
+export function addressedSessions(peer: { pid: number; list: readonly SessionInfo[] }): AddressedSession[] {
+	return peer.list.map((session) => ({ address: peerAddress(peer.pid, session.sessionId, peer.list.length), pid: peer.pid, session }));
+}
+
+export type Target =
+	| { kind: "found"; target: AddressedSession }
+	| { kind: "not_found"; online: readonly string[] }
+	| { kind: "ambiguous"; candidates: readonly string[] }
+	| { kind: "unlisted"; reason: string };
+
+/** Ask the addressed process which main sessions it hosts now, so `<pid>` follows `/new` and resume. */
+export async function resolveTarget(dir: string, address: PeerAddress): Promise<Target> {
+	const peer = await observe(dir, address.pid);
+	if (peer === undefined) return { kind: "not_found", online: await onlineAddresses(dir) };
+	if (peer.sessions.kind === "unlisted") return { kind: "unlisted", reason: peer.sessions.reason };
+	const sessions = addressedSessions({ pid: peer.pid, list: peer.sessions.list });
+	if (address.sessionId !== undefined) {
+		const exact = sessions.find((candidate) => candidate.session.sessionId === address.sessionId);
+		return exact === undefined ? { kind: "not_found", online: await onlineAddresses(dir) } : { kind: "found", target: exact };
+	}
+	const [only, ...rest] = sessions;
+	if (only === undefined) return { kind: "not_found", online: await onlineAddresses(dir) };
+	if (rest.length > 0) return { kind: "ambiguous", candidates: sessions.map((candidate) => candidate.address) };
+	return { kind: "found", target: only };
+}
+
+async function onlineAddresses(dir: string): Promise<string[]> {
+	const addresses: string[] = [];
+	for (const peer of await survey(dir)) {
+		if (peer.sessions.kind === "listed")
+			addresses.push(...addressedSessions({ pid: peer.pid, list: peer.sessions.list }).map((s) => s.address));
+	}
+	return addresses;
 }

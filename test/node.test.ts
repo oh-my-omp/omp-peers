@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exchange, survey } from "../src/client.ts";
+import { exchange, parseAddress, resolveTarget, survey } from "../src/client.ts";
 import type * as NodeModule from "../src/node.ts";
-import { type AskOutcome, endpointFor, type LocalMain, node, PeerNode } from "../src/node.ts";
+import { type AskOutcome, endpointFor, type LocalMain, node, PeerNode, WAKE_BUDGET } from "../src/node.ts";
 import { MAX_FRAME_BYTES, PROTOCOL_VERSION, type Sender, truncateUtf8, type WireRequest } from "../src/protocol.ts";
 
 const DIR = join(mkdtempSync(join(tmpdir(), "omp-peers-node-")), "peers");
@@ -162,6 +162,72 @@ describe("requests", () => {
 	});
 });
 
+describe("wake budget", () => {
+	test("one source process gets its first messages delivered, the next refused, and side questions still answered", async () => {
+		const main = fakeMain("Main", "s-1", answering("still here"));
+		await add(main);
+		const from = { ...FROM, pid: 424242 };
+		for (let i = 0; i < WAKE_BUDGET; i++) {
+			const sent = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "irc", to: "s-1", from, message: `m${i}` }, 1_000);
+			expect(sent).toEqual({ kind: "response", response: { kind: "accepted", recipient: "idle" } });
+		}
+		const over = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "irc", to: "s-1", from, message: "one more" }, 1_000);
+		expect(over.kind === "response" && over.response.kind === "error" && over.response.code).toBe("budget_exceeded");
+		expect(main.delivered).toHaveLength(WAKE_BUDGET);
+		expect(main.delivered).not.toContain("one more");
+
+		const other = await exchange(
+			DIR,
+			process.pid,
+			{ v: PROTOCOL_VERSION, kind: "irc", to: "s-1", from: { ...FROM, pid: 434343 }, message: "x" },
+			1_000,
+		);
+		expect(other).toEqual({ kind: "response", response: { kind: "accepted", recipient: "idle" } });
+		const asked = await exchange(DIR, process.pid, { v: PROTOCOL_VERSION, kind: "ask", to: "s-1", from, question: "q?" }, 1_000);
+		expect(asked).toEqual({ kind: "response", response: { kind: "answer", text: "still here", truncated: false } });
+	});
+});
+
+describe("peer addresses", () => {
+	test("parse <pid> and <pid>/<sessionId>, nothing else", () => {
+		expect(parseAddress("123", "")).toEqual({ pid: 123, sessionId: undefined });
+		expect(parseAddress("123", "/s%2F1")).toEqual({ pid: 123, sessionId: "s/1" });
+		for (const [host, path] of [
+			["", ""],
+			["0", ""],
+			["12a", ""],
+			["0123", ""],
+			["123", "/a/b"],
+			["123", "/%E0%A4%A"],
+		]) {
+			expect(parseAddress(host ?? "", path ?? "")).toBeUndefined();
+		}
+	});
+
+	test("<pid> reaches a process's only main session; several sessions make it ambiguous and <pid>/<sessionId> picks one", async () => {
+		await add(fakeMain("Main", "s-1", answering("x")));
+		const single = await resolveTarget(DIR, { pid: process.pid, sessionId: undefined });
+		expect(single.kind === "found" && single.target.address).toBe(String(process.pid));
+
+		await add(fakeMain("acp:2", "s-2", answering("y")));
+		expect(await resolveTarget(DIR, { pid: process.pid, sessionId: undefined })).toEqual({
+			kind: "ambiguous",
+			candidates: [`${process.pid}/s-1`, `${process.pid}/s-2`],
+		});
+		const picked = await resolveTarget(DIR, { pid: process.pid, sessionId: "s-2" });
+		expect(picked.kind === "found" && picked.target.address).toBe(`${process.pid}/s-2`);
+
+		expect(await resolveTarget(DIR, { pid: process.pid, sessionId: "gone" })).toEqual({
+			kind: "not_found",
+			online: [`${process.pid}/s-1`, `${process.pid}/s-2`],
+		});
+		expect(await resolveTarget(DIR, { pid: 999_999_999, sessionId: undefined })).toEqual({
+			kind: "not_found",
+			online: [`${process.pid}/s-1`, `${process.pid}/s-2`],
+		});
+	});
+});
+
 describe("request parsing at the endpoint", () => {
 	test("legacy senders parse as main and subagent senders retain their identity through ask and irc delivery", async () => {
 		const main = fakeMain("Main", "s-1", answering("answer"));
@@ -177,7 +243,7 @@ describe("request parsing at the endpoint", () => {
 			});
 		}
 		const expected: Sender[] = [
-			{ kind: "main", ...FROM },
+			{ kind: "main", address: String(FROM.pid), ...FROM },
 			{ kind: "sub", agentId: "AreaManager", ...FROM },
 		];
 		expect(main.askSenders).toEqual(expected);

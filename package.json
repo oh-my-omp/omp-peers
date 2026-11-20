@@ -1,7 +1,7 @@
 {
 	"name": "omp-peers",
-	"version": "0.2.1",
-	"description": "Lets the omp main agents of one user find each other, ask /btw-style side questions and exchange IRC messages across processes",
+	"version": "1.0.0",
+	"description": "Lets the omp main sessions of one user, in any folder, find each other through peer://, ask side questions and exchange messages across processes",
 	"type": "module",
 	"repository": {
 		"type": "git",
@@ -19,7 +19,14 @@
 	"omp": {
 		"extensions": [
 			"./index.ts"
-		]
+		],
+		"settings": {
+			"enabled": {
+				"type": "boolean",
+				"default": true,
+				"description": "Open this omp's peer endpoint and offer peer:// to its sessions; a change takes effect when omp next starts"
+			}
+		}
 	},
 	"scripts": {
 		"check": "biome check . && tsc --noEmit",

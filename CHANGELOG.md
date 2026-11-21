@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- The `peer_list`, `peer_ask` and `peer_send` tools and their `xd://peer_*` topics are gone: models use the `peer://` internal URL instead — `read peer://` lists peers, `write peer://<address>` sends a message and `write peer://<address>?ask` asks a side question whose answer is the write result
+- Peers are addressed by process id (`peer://<pid>`, or `peer://<pid>/<sessionId>` when one omp process hosts several main sessions) instead of by session id, so an address stays valid across `/new` and resume
+
+### Added
+
+- Added the plugin setting `enabled` (default on; `/settings` → Plugins or `omp plugin config`): turned off, an omp process opens no peer endpoint and offers no `peer://`; a change takes effect when omp next starts
+- Added peer:// write errors for missing, unreachable, ambiguous, unlisted or self targets and validation for malformed addresses, unsupported query parameters, empty content or oversized content
+- An omp process accepts at most 20 messages per 10 minutes from any one other omp process; further messages are refused with `budget_exceeded`, so two models cannot wake each other forever (side questions are not counted)
+
+### Changed
+
+- Peer side questions now include in-flight tool calls, and peer prompts use peer:// sender labels with reply instructions for main senders and a one-way notice for subagents
+- A side question's model usage is recorded in the asked session's usage journal under the purpose `omp-peers-ask`
+
+### Security
+
+- Escaped harness tags in peer messages so content cannot forge or close the message envelope
+
 ## [0.2.2] - 2026-11-21
 
 ### Fixed

@@ -48,7 +48,7 @@ const transform = advisorToolIOTransform(
 	),
 	new Set(),
 );
-const SENDER: Sender = { kind: "main", pid: 4242, sessionId: "bench-sender", title: "bench sender", cwd: "/tmp/bench" };
+const SENDER: Sender = { kind: "main", address: "4242", pid: 4242, sessionId: "bench-sender", title: "bench sender", cwd: "/tmp/bench" };
 
 function lcg(seed: number): () => number {
 	let s = seed >>> 0;
@@ -130,7 +130,7 @@ function deliverInto(sm: SessionManagerT): (message: string) => void {
 	const ctx = { isIdle: () => true, agent: { id: "bench" }, sessionManager: sm };
 	const api = pi as unknown as ExtensionAPI;
 	const context = ctx as unknown as ExtensionContext;
-	const main = localMain(api, context);
+	const main = localMain(api, context, () => []);
 	return (message) => main.deliver(message, SENDER);
 }
 

@@ -18,13 +18,19 @@
 - Peer side questions now include in-flight tool calls, and peer prompts use peer:// sender labels with reply instructions for main senders and a one-way notice for subagents
 - A side question's model usage is recorded in the asked session's usage journal under the purpose `omp-peers-ask`
 
+### Security
+
+- Escaped harness tags in peer messages so content cannot forge or close the message envelope
+
+## [0.2.2] - 2026-11-21
+
 ### Fixed
 
 - omp-peers loads again on omp 19 (it imported getDaemonRuntimeRoot, which omp 19 removed)
 
-### Security
+### Removed
 
-- Escaped harness tags in peer messages so content cannot forge or close the message envelope
+- peer_list no longer lists omp processes that are not bridged, because omp 19 no longer exposes them to plugins
 
 ## [0.2.1] - 2026-11-19
 

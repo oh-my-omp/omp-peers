@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-22
+
 ### Breaking Changes
 
 - The `peer_list`, `peer_ask` and `peer_send` tools and their `xd://peer_*` topics are gone: models use the `peer://` internal URL instead — `read peer://` lists peers, `write peer://<address>` sends a message and `write peer://<address>?ask` asks a side question whose answer is the write result

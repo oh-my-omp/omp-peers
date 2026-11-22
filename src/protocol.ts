@@ -1,4 +1,4 @@
-import { z } from "@oh-my-pi/pi-coding-agent";
+import { z } from "@oh-my-pi/omptype/zod";
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_TEXT_BYTES = 64 * 1024;

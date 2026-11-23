@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-24
+
 ### Changed
 
 - `@oh-my-pi/omptype` is now a peer dependency, and `@oh-my-pi/pi-utils` is no longer one

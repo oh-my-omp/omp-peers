@@ -1,9 +1,10 @@
 import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CustomMessageEntry, ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { SessionManager as SessionManagerT } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import type * as AsyncCardsModule from "@oh-my-pi/pi-coding-agent/ui/transcript/messages/async-cards";
 import type * as LocalMainModule from "../../src/local-main.ts";
 import type { Sender } from "../../src/protocol.ts";
 
@@ -18,9 +19,14 @@ const { SecretObfuscator } = await import("@oh-my-pi/pi-coding-agent/secrets/obf
 const { builtinCredentialSecretEntries } = await import("@oh-my-pi/pi-coding-agent/secrets/index");
 const { advisorToolIOTransform } = await import("@oh-my-pi/pi-coding-agent/advisor/delta-split");
 const { normalizeCustomMessagePayload } = await import("@oh-my-pi/pi-coding-agent/session/messages");
-const { buildIrcMessageCard } = await import("@oh-my-pi/pi-tui/chat/transcript-render-helpers");
+const { UiNode } = await import("@oh-my-pi/pi-tui/node");
+const { paintNode, staticEnvironment } = await import("@oh-my-pi/pi-tui/term/paint");
 const { loadThemeSync } = await import("@oh-my-pi/pi-tui/theme/loader");
-const { setThemeInstance } = await import("@oh-my-pi/pi-tui/theme/theme");
+const { setCurrentTheme } = await import("@oh-my-pi/pi-tui/theme/runtime");
+await import("@oh-my-pi/pi-tui/term/painters/index");
+await import("@oh-my-pi/pi-coding-agent/ui/styles/index");
+const hostSrc = dirname(Bun.resolveSync("@oh-my-pi/pi-coding-agent", import.meta.dir));
+const { IrcMessageBlock }: typeof AsyncCardsModule = await import(join(hostSrc, "ui/transcript/messages/async-cards.tsx"));
 
 type IrcMessage = Extract<AgentMessage, { role: "custom" }>;
 
@@ -36,7 +42,9 @@ const { values: args } = parseArgs({
 const srcDir = resolve(args.src ?? join(import.meta.dir, "../../src"));
 const { localMain }: typeof LocalMainModule = await import(join(srcDir, "local-main.ts"));
 
-setThemeInstance(loadThemeSync("dark"));
+const theme = loadThemeSync("dark");
+setCurrentTheme(theme);
+const paintEnv = staticEnvironment(theme);
 
 const ROUNDS = 5;
 const CARD_WIDTH = 100;
@@ -140,10 +148,11 @@ function detailsMessage(details: unknown): string {
 }
 
 function render(message: IrcMessage): Pick<TierRecord, "summaryPlain" | "summaryRedacted" | "cardCollapsed" | "cardExpanded"> {
-	const card = (expanded: boolean) =>
-		buildIrcMessageCard({ ...message, timestamp: 0 }, () => expanded)
-			.render(CARD_WIDTH)
-			.map((row) => Bun.stripANSI(row).trimEnd());
+	const card = (expanded: boolean) => {
+		const node = IrcMessageBlock({ message: { ...message, timestamp: 0 }, expanded: () => expanded, visible: true });
+		if (!(node instanceof UiNode)) throw new Error("IrcMessageBlock did not return a node");
+		return paintNode(paintEnv, node, CARD_WIDTH).rows.map((row) => Bun.stripANSI(row).trimEnd());
+	};
 	return {
 		summaryPlain: formatSessionHistoryMarkdown([message]).trim(),
 		summaryRedacted: formatSessionHistoryMarkdown([message], { transformExpandedToolIO: transform }).trim(),
